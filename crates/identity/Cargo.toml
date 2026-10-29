@@ -1,0 +1,10 @@
+[package]
+name = "norylum-identity"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+norylum-foundation = { path = "../foundation" }
+serde.workspace = true
+

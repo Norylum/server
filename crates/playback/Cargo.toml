@@ -1,0 +1,18 @@
+[package]
+name = "norylum-playback"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+norylum-foundation = { path = "../foundation" }
+norylum-authorization = { path = "../authorization" }
+axum.workspace = true
+tokio.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+uuid.workspace = true

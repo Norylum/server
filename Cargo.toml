@@ -1,0 +1,42 @@
+[workspace]
+resolver = "2"
+members = [
+    "apps/norylum-server",
+    "crates/foundation",
+    "crates/runtime",
+    "crates/api",
+    "crates/identity",
+    "crates/auth",
+    "crates/profiles",
+    "crates/devices",
+    "crates/authorization",
+    "crates/library",
+    "crates/catalog",
+    "crates/metadata",
+    "crates/streaming",
+    "crates/playback",
+    "crates/persistence",
+    "shared/api-types",
+    "shared/test-support",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+axum = "0.7"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+tokio-util = { version = "0.7", features = ["io"] }
+bytes = "1"
+async-trait = "0.1"
+sha2 = "0.10"
+http-body-util = "0.1"

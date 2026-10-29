@@ -1,0 +1,21 @@
+[package]
+name = "norylum-streaming"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+norylum-foundation = { path = "../foundation" }
+norylum-library = { path = "../library" }
+norylum-catalog = { path = "../catalog" }
+norylum-authorization = { path = "../authorization" }
+axum.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+bytes.workspace = true
+tracing.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+uuid.workspace = true

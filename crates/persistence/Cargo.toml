@@ -1,0 +1,11 @@
+[package]
+name = "norylum-persistence"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+norylum-foundation = { path = "../foundation" }
+serde.workspace = true
+tokio.workspace = true
+

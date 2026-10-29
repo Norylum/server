@@ -1,0 +1,26 @@
+[package]
+name = "norylum-server"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tokio.workspace = true
+axum.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+# Crates internes
+norylum-foundation = { path = "../../crates/foundation" }
+norylum-authorization = { path = "../../crates/authorization" }
+norylum-library = { path = "../../crates/library" }
+norylum-catalog = { path = "../../crates/catalog" }
+norylum-streaming = { path = "../../crates/streaming" }
+norylum-playback = { path = "../../crates/playback" }
+norylum-api = { path = "../../crates/api" }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+uuid.workspace = true
+http-body-util.workspace = true
+serde_json.workspace = true
