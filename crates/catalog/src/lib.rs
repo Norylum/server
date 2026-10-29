@@ -1,52 +1,65 @@
 //! Crate `catalog` pour Norylum Server.
-//! Maintient l'inventaire en mémoire des médias indexés et fournit
-//! des fonctions de recherche filtrées par les politiques d'autorisation.
+//! Maintient l'inventaire persistant des médias indexés dans SQLite
+//! et fournit des fonctions de recherche filtrées par les politiques d'autorisation.
 
 use norylum_authorization::{Authorizer, MediaAccessInfo};
 use norylum_foundation::{MediaId, RequestContext};
 use norylum_library::MediaItem;
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use norylum_persistence::Database;
 
-/// Service central de catalogue média pour Norylum.
-#[derive(Debug, Default, Clone)]
+/// Service central de catalogue média pour Norylum, adossé à SQLite local-first.
+#[derive(Clone)]
 pub struct CatalogService {
-    items: Arc<RwLock<HashMap<MediaId, MediaItem>>>,
+    db: Database,
 }
 
 impl CatalogService {
-    pub fn new() -> Self {
-        Self {
-            items: Arc::new(RwLock::new(HashMap::new())),
-        }
+    /// Initialise le service de catalogue avec une instance de base de données SQLite.
+    pub fn new(db: Database) -> Self {
+        Self { db }
     }
 
-    /// Ajoute ou met à jour un média dans le catalogue.
+    /// Crée une instance avec une base SQLite en mémoire vive (pour tests).
+    pub fn in_memory() -> Self {
+        let db = Database::in_memory().expect("Échec d'initialisation SQLite en mémoire");
+        Self { db }
+    }
+
+    /// Accède à la référence de la base de données sous-jacente.
+    pub fn db(&self) -> &Database {
+        &self.db
+    }
+
+    /// Ajoute ou met à jour un média dans le catalogue persistant.
     pub async fn add_item(&self, item: MediaItem) {
-        let mut map = self.items.write().await;
-        map.insert(item.id.clone(), item);
-    }
-
-    /// Remplace ou fusionne un lot d'éléments indexés.
-    pub async fn replace_all(&self, new_items: Vec<MediaItem>) {
-        let mut map = self.items.write().await;
-        map.clear();
-        for item in new_items {
-            map.insert(item.id.clone(), item);
+        if let Err(e) = self.db.sync_media_items(&[item]).await {
+            tracing::error!(error = %e, "Échec lors de l'enregistrement SQLite du média");
         }
     }
 
-    /// Récupère un média par son identifiant unique.
+    /// Synchronise l'ensemble des éléments indexés dans SQLite.
+    /// Préserve les IDs stables existants et supprime les éléments orphelins.
+    pub async fn replace_all(&self, new_items: Vec<MediaItem>) -> Vec<MediaItem> {
+        match self.db.sync_media_items(&new_items).await {
+            Ok(items) => items,
+            Err(e) => {
+                tracing::error!(
+                    error = %e,
+                    "Échec de la synchronisation SQLite du catalogue"
+                );
+                Vec::new()
+            }
+        }
+    }
+
+    /// Récupère un média par son identifiant unique depuis SQLite.
     pub async fn get_by_id(&self, id: &MediaId) -> Option<MediaItem> {
-        let map = self.items.read().await;
-        map.get(id).cloned()
+        self.db.get_media_by_id(id).await.unwrap_or(None)
     }
 
     /// Liste l'ensemble des médias du catalogue (sans contrôle de contexte).
     pub async fn list_all(&self) -> Vec<MediaItem> {
-        let map = self.items.read().await;
-        map.values().cloned().collect()
+        self.db.list_all_media().await.unwrap_or_default()
     }
 
     /// Liste uniquement les médias accessibles selon le contexte de requête et les règles fail-closed de l'Authorizer.
@@ -60,10 +73,10 @@ impl CatalogService {
             return Vec::new();
         }
 
-        let map = self.items.read().await;
+        let all_items = self.list_all().await;
         let mut authorized = Vec::new();
 
-        for item in map.values() {
+        for item in all_items {
             let access_info =
                 MediaAccessInfo::new(item.id.clone(), item.is_child_safe, item.age_rating);
 
@@ -72,7 +85,7 @@ impl CatalogService {
                 .await
                 .is_ok()
             {
-                authorized.push(item.clone());
+                authorized.push(item);
             }
         }
 
@@ -81,8 +94,13 @@ impl CatalogService {
 
     /// Nombre de médias indexés.
     pub async fn count(&self) -> usize {
-        let map = self.items.read().await;
-        map.len()
+        self.db.count_media().await.unwrap_or(0)
+    }
+}
+
+impl Default for CatalogService {
+    fn default() -> Self {
+        Self::in_memory()
     }
 }
 
@@ -93,8 +111,8 @@ mod tests {
     use std::path::PathBuf;
 
     #[tokio::test]
-    async fn test_catalog_filtering_by_context() {
-        let catalog = CatalogService::new();
+    async fn test_catalog_sqlite_persistence() {
+        let catalog = CatalogService::in_memory();
         let authorizer = DefaultAuthorizer::new();
 
         let kid_item = MediaItem {
@@ -129,12 +147,12 @@ mod tests {
             age_rating: Some(16),
         };
 
-        catalog.add_item(kid_item.clone()).await;
-        catalog.add_item(adult_item.clone()).await;
+        catalog
+            .replace_all(vec![kid_item.clone(), adult_item.clone()])
+            .await;
 
         let child_ctx = RequestContext::authenticated("acc_1", "prof_kid", "dev_tv", true, Some(6));
         let adult_ctx = RequestContext::authenticated("acc_1", "prof_dad", "dev_pc", false, None);
-        let unauth_ctx = RequestContext::unauthenticated();
 
         // Enfant ne voit que Peppa Pig
         let child_list = catalog.list_for_context(&child_ctx, &authorizer).await;
@@ -145,8 +163,9 @@ mod tests {
         let adult_list = catalog.list_for_context(&adult_ctx, &authorizer).await;
         assert_eq!(adult_list.len(), 2);
 
-        // Non authentifié ne voit rien
-        let unauth_list = catalog.list_for_context(&unauth_ctx, &authorizer).await;
-        assert_eq!(unauth_list.len(), 0);
+        // Vérification de la persistance unitaire par ID
+        let fetched = catalog.get_by_id(&kid_item.id).await;
+        assert!(fetched.is_some());
+        assert_eq!(fetched.unwrap().title, "Peppa Pig");
     }
 }

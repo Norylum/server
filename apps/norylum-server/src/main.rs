@@ -4,6 +4,7 @@
 use norylum_api::{create_router, AppState};
 use norylum_authorization::DefaultAuthorizer;
 use norylum_catalog::CatalogService;
+use norylum_persistence::Database;
 use norylum_playback::PlaybackService;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -34,10 +35,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let canonical_media_dir = std::fs::canonicalize(&media_dir)?;
     tracing::info!(media_dir = ?canonical_media_dir, "Répertoire média configuré");
 
-    // Instanciation des services du domaine
-    let catalog = Arc::new(CatalogService::new());
+    // Initialisation de la persistance SQLite local-first (WAL + migrations automatiques)
+    let db_path = canonical_media_dir.join("norylum.sqlite3");
+    tracing::info!(db_path = ?db_path, "Connexion à la base SQLite Norylum");
+    let db = Database::open(&db_path)?;
+
+    // Instanciation des services du domaine adossés à SQLite
+    let catalog = Arc::new(CatalogService::new(db.clone()));
     let authorizer = Arc::new(DefaultAuthorizer::new());
-    let playback = Arc::new(PlaybackService::new());
+    let playback = Arc::new(PlaybackService::new(db));
 
     // Injection de l'état partagé (remplace les appels HTTP inter-services)
     let app_state = AppState::new(canonical_media_dir, catalog, authorizer, playback);

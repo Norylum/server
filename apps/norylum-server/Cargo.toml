@@ -18,6 +18,7 @@ norylum-catalog = { path = "../../crates/catalog" }
 norylum-streaming = { path = "../../crates/streaming" }
 norylum-playback = { path = "../../crates/playback" }
 norylum-api = { path = "../../crates/api" }
+norylum-persistence = { path = "../../crates/persistence" }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

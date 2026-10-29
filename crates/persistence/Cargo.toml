@@ -6,6 +6,13 @@ license.workspace = true
 
 [dependencies]
 norylum-foundation = { path = "../foundation" }
-serde.workspace = true
+norylum-library = { path = "../library" }
+rusqlite.workspace = true
 tokio.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+serde.workspace = true
+thiserror.workspace = true
 
+[dev-dependencies]
+uuid.workspace = true

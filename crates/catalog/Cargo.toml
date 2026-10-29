@@ -8,6 +8,7 @@ license.workspace = true
 norylum-foundation = { path = "../foundation" }
 norylum-authorization = { path = "../authorization" }
 norylum-library = { path = "../library" }
+norylum-persistence = { path = "../persistence" }
 tokio.workspace = true
 serde.workspace = true
 tracing.workspace = true

@@ -145,9 +145,9 @@ mod tests {
         let temp_dir = std::env::temp_dir();
         let state = AppState::new(
             temp_dir,
-            Arc::new(CatalogService::new()),
+            Arc::new(CatalogService::in_memory()),
             Arc::new(DefaultAuthorizer::new()),
-            Arc::new(PlaybackService::new()),
+            Arc::new(PlaybackService::in_memory()),
         );
 
         let app = create_router(state);

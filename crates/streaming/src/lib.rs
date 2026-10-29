@@ -356,7 +356,7 @@ mod tests {
         let video_path = temp_dir.join("secret_adult.mp4");
         std::fs::write(&video_path, b"adult content").unwrap();
 
-        let catalog = Arc::new(CatalogService::new());
+        let catalog = Arc::new(CatalogService::in_memory());
         let authorizer = Arc::new(DefaultAuthorizer::new());
 
         let media_id = MediaId::new("med_adult");

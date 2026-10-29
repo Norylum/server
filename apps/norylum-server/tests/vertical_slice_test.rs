@@ -1,5 +1,6 @@
 //! Test d'intégration complet de la tranche verticale :
 //! Scan Média -> Catalogue -> Streaming Direct Play 206 -> Progression Playback.
+//! Valide la persistance SQLite local-first (`norylum.sqlite3`), la survie aux redémarrages et la stabilité des MediaId.
 
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
@@ -8,6 +9,7 @@ use norylum_api::{create_router, AppState};
 use norylum_authorization::DefaultAuthorizer;
 use norylum_catalog::CatalogService;
 use norylum_library::MediaItem;
+use norylum_persistence::Database;
 use norylum_playback::{PlaybackProgress, PlaybackService};
 use std::io::Write;
 use std::sync::Arc;
@@ -29,11 +31,14 @@ async fn test_full_vertical_slice() {
     let mut file2 = std::fs::File::create(&adult_video).unwrap();
     file2.write_all(b"ADULT_CONTENT_RESTRICTED").unwrap();
 
-    // 2. Initialisation de l'application Monolithe Norylum
+    // 2. Initialisation de la persistance SQLite local-first sur disque
     let canonical_root = std::fs::canonicalize(&temp_root).unwrap();
-    let catalog = Arc::new(CatalogService::new());
+    let db_path = canonical_root.join("norylum.sqlite3");
+    let db = Database::open(&db_path).unwrap();
+
+    let catalog = Arc::new(CatalogService::new(db.clone()));
     let authorizer = Arc::new(DefaultAuthorizer::new());
-    let playback = Arc::new(PlaybackService::new());
+    let playback = Arc::new(PlaybackService::new(db.clone()));
 
     let state = AppState::new(
         canonical_root.clone(),
@@ -57,7 +62,7 @@ async fn test_full_vertical_slice() {
     let resp = app.clone().oneshot(unauth_scan_req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 
-    // Cas 2 : Authentifié -> Scan réussi
+    // Cas 2 : Authentifié -> Scan réussi et persisté dans SQLite
     let auth_scan_req = Request::builder()
         .method("POST")
         .uri("/v1/library/scan")
@@ -211,7 +216,7 @@ async fn test_full_vertical_slice() {
         .body(Body::empty())
         .unwrap();
 
-    let resp = app.oneshot(get_progress_req).await.unwrap();
+    let resp = app.clone().oneshot(get_progress_req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
     let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
@@ -219,7 +224,65 @@ async fn test_full_vertical_slice() {
     assert_eq!(read_progress.media_id, kids_media_id);
     assert_eq!(read_progress.position_seconds, 95.0);
 
+    // ---------------------------------------------------------
+    // ÉTAPE E : Redémarrage Serveur et Persistance SQLite
+    // ---------------------------------------------------------
+    // Simule l'arrêt du serveur et le redémarrage d'une nouvelle instance pointant sur la même base
+    drop(app);
+    drop(catalog);
+    drop(playback);
+    drop(db);
+
+    // Réouverture de la base existante
+    let reboot_db = Database::open(&db_path).unwrap();
+    let reboot_catalog = Arc::new(CatalogService::new(reboot_db.clone()));
+    let reboot_playback = Arc::new(PlaybackService::new(reboot_db.clone()));
+
+    let reboot_state = AppState::new(
+        canonical_root.clone(),
+        reboot_catalog.clone(),
+        authorizer.clone(),
+        reboot_playback.clone(),
+    );
+    let reboot_app = create_router(reboot_state);
+
+    // 1. Les médias du catalogue sont toujours présents SANS avoir refait de scan
+    let media_after_reboot = Request::builder()
+        .method("GET")
+        .uri("/v1/library/media")
+        .header("x-account-id", "acc_famille")
+        .header("x-profile-id", "prof_parent")
+        .header("x-is-child", "false")
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = reboot_app
+        .clone()
+        .oneshot(media_after_reboot)
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let reloaded_media: Vec<MediaItem> = serde_json::from_slice(&body_bytes).unwrap();
+    assert_eq!(reloaded_media.len(), 2);
+
+    // 2. La progression de lecture a également survécu au redémarrage
+    let progress_after_reboot = Request::builder()
+        .method("GET")
+        .uri(format!("/v1/playback/{}", kids_media_id))
+        .header("x-account-id", "acc_famille")
+        .header("x-profile-id", "prof_enfant")
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = reboot_app.oneshot(progress_after_reboot).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let reloaded_prog: PlaybackProgress = serde_json::from_slice(&body_bytes).unwrap();
+    assert_eq!(reloaded_prog.media_id, kids_media_id);
+    assert_eq!(reloaded_prog.position_seconds, 95.0);
+    assert!(reloaded_prog.is_completed);
+
     // Nettoyage
     let _ = std::fs::remove_dir_all(temp_root);
 }
-

@@ -1,28 +1,16 @@
 //! Crate `playback` pour Norylum Server.
-//! Gère le suivi et la persistance en mémoire de la progression de lecture vidéo
-//! pour chaque profil utilisateur.
+//! Gère le suivi et la persistance SQLite de la progression de lecture vidéo
+//! pour chaque profil utilisateur au sein d'un compte.
 
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use axum::Json;
-use chrono::{DateTime, Utc};
 use norylum_authorization::Authorizer;
 use norylum_foundation::{AccountId, DeviceId, MediaId, NorylumError, ProfileId, RequestContext};
+use norylum_persistence::Database;
+pub use norylum_persistence::PlaybackProgressRecord as PlaybackProgress;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
-
-/// État de progression d'une lecture vidéo.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct PlaybackProgress {
-    pub profile_id: ProfileId,
-    pub media_id: MediaId,
-    pub position_seconds: f64,
-    pub duration_seconds: f64,
-    pub is_completed: bool,
-    pub updated_at: DateTime<Utc>,
-}
 
 /// Corps de requête pour mettre à jour la progression de lecture.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,65 +20,79 @@ pub struct UpdateProgressPayload {
     pub duration_seconds: f64,
 }
 
-/// Service de suivi de progression de lecture.
-#[derive(Debug, Default, Clone)]
+/// Service de suivi de progression de lecture adossé à SQLite.
+#[derive(Clone)]
 pub struct PlaybackService {
-    store: Arc<RwLock<HashMap<(ProfileId, MediaId), PlaybackProgress>>>,
+    db: Database,
 }
 
 impl PlaybackService {
-    pub fn new() -> Self {
-        Self {
-            store: Arc::new(RwLock::new(HashMap::new())),
-        }
+    /// Initialise le service de playback avec une instance de base de données SQLite.
+    pub fn new(db: Database) -> Self {
+        Self { db }
     }
 
-    /// Enregistre ou met à jour la progression de lecture pour un profil et un média donnés.
+    /// Crée une instance avec une base SQLite en mémoire vive (pour tests).
+    pub fn in_memory() -> Self {
+        let db = Database::in_memory().expect("Échec d'initialisation SQLite en mémoire");
+        Self { db }
+    }
+
+    /// Accède à la référence de la base de données sous-jacente.
+    pub fn db(&self) -> &Database {
+        &self.db
+    }
+
+    /// Enregistre ou met à jour la progression de lecture pour un compte, un profil et un média.
+    /// Applique la règle de complétion automatique si position / durée >= 90%.
     pub async fn update_progress(
         &self,
-        profile_id: ProfileId,
-        media_id: MediaId,
+        account_id: &AccountId,
+        profile_id: &ProfileId,
+        media_id: &MediaId,
         position_seconds: f64,
         duration_seconds: f64,
-    ) -> PlaybackProgress {
-        let is_completed = if duration_seconds > 0.0 {
-            (position_seconds / duration_seconds) >= 0.90
-        } else {
-            false
-        };
-
-        let progress = PlaybackProgress {
-            profile_id: profile_id.clone(),
-            media_id: media_id.clone(),
-            position_seconds,
-            duration_seconds,
-            is_completed,
-            updated_at: Utc::now(),
-        };
-
-        let mut store = self.store.write().await;
-        store.insert((profile_id, media_id), progress.clone());
-        progress
+    ) -> Result<PlaybackProgress, NorylumError> {
+        self.db
+            .save_playback_progress(
+                account_id,
+                profile_id,
+                media_id,
+                position_seconds,
+                duration_seconds,
+            )
+            .await
     }
 
-    /// Récupère la progression d'un média pour un profil donné.
+    /// Récupère la progression d'un média pour un compte et un profil donnés.
     pub async fn get_progress(
         &self,
+        account_id: &AccountId,
         profile_id: &ProfileId,
         media_id: &MediaId,
     ) -> Option<PlaybackProgress> {
-        let store = self.store.read().await;
-        store.get(&(profile_id.clone(), media_id.clone())).cloned()
+        self.db
+            .get_playback_progress(account_id, profile_id, media_id)
+            .await
+            .unwrap_or(None)
     }
 
     /// Liste l'ensemble des progressions associées à un profil.
-    pub async fn list_by_profile(&self, profile_id: &ProfileId) -> Vec<PlaybackProgress> {
-        let store = self.store.read().await;
-        store
-            .iter()
-            .filter(|((p, _), _)| p == profile_id)
-            .map(|(_, prog)| prog.clone())
-            .collect()
+    pub async fn list_by_profile(
+        &self,
+        account_id: &AccountId,
+        profile_id: &ProfileId,
+    ) -> Vec<PlaybackProgress> {
+        self.db
+            .list_playback_progress_for_profile(account_id, profile_id)
+            .await
+            .unwrap_or_default()
+    }
+}
+
+impl Default for PlaybackService {
+    fn default() -> Self {
+        Self::in_memory()
     }
 }
 
@@ -144,12 +146,13 @@ pub async fn update_progress_handler(
     let progress = state
         .playback
         .update_progress(
-            ctx.profile_id().clone(),
-            payload.media_id,
+            ctx.account_id(),
+            ctx.profile_id(),
+            &payload.media_id,
             payload.position_seconds,
             payload.duration_seconds,
         )
-        .await;
+        .await?;
 
     Ok(Json(progress))
 }
@@ -165,7 +168,7 @@ pub async fn get_progress_handler(
 
     let progress = state
         .playback
-        .get_progress(ctx.profile_id(), &media_id)
+        .get_progress(ctx.account_id(), ctx.profile_id(), &media_id)
         .await
         .ok_or_else(|| {
             NorylumError::NotFound(format!(
@@ -184,32 +187,37 @@ mod tests {
     use norylum_authorization::DefaultAuthorizer;
 
     #[tokio::test]
-    async fn test_playback_progress_completion() {
-        let service = PlaybackService::new();
+    async fn test_playback_progress_completion_and_sqlite() {
+        let service = PlaybackService::in_memory();
+        let acc = AccountId::new("acc_test");
         let prof = ProfileId::new("prof_1");
         let media = MediaId::new("med_film");
 
         // 50% lu -> non complété
         let p1 = service
-            .update_progress(prof.clone(), media.clone(), 500.0, 1000.0)
-            .await;
+            .update_progress(&acc, &prof, &media, 500.0, 1000.0)
+            .await
+            .unwrap();
         assert!(!p1.is_completed);
 
         // 92% lu -> complété
         let p2 = service
-            .update_progress(prof.clone(), media.clone(), 920.0, 1000.0)
-            .await;
+            .update_progress(&acc, &prof, &media, 920.0, 1000.0)
+            .await
+            .unwrap();
         assert!(p2.is_completed);
 
-        let retrieved = service.get_progress(&prof, &media).await.unwrap();
+        let retrieved = service.get_progress(&acc, &prof, &media).await.unwrap();
         assert_eq!(retrieved.position_seconds, 920.0);
         assert!(retrieved.is_completed);
+        assert_eq!(retrieved.account_id, acc);
+        assert_eq!(retrieved.profile_id, prof);
     }
 
     #[tokio::test]
     async fn test_playback_fail_closed_unauth() {
         let authorizer = Arc::new(DefaultAuthorizer::new());
-        let playback = Arc::new(PlaybackService::new());
+        let playback = Arc::new(PlaybackService::in_memory());
         let state = PlaybackState {
             playback,
             authorizer,
