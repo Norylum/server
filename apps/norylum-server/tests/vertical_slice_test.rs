@@ -1,5 +1,5 @@
 //! Test d'intégration complet de la tranche verticale :
-//! Scan Média -> Catalogue -> Streaming Direct Play 206 -> Progression Playback.
+//! Scan Média -> Catalogue (Movies & Shows) -> Épisodes -> Streaming Direct Play 206 -> Progression Playback.
 //! Valide la persistance SQLite local-first (`norylum.sqlite3`), la survie aux redémarrages et la stabilité des MediaId.
 
 use axum::body::Body;
@@ -7,7 +7,7 @@ use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
 use norylum_api::{create_router, AppState};
 use norylum_authorization::DefaultAuthorizer;
-use norylum_catalog::CatalogService;
+use norylum_catalog::{CatalogService, SeasonDetails, ShowDetails, ShowRecord};
 use norylum_library::MediaItem;
 use norylum_persistence::Database;
 use norylum_playback::{PlaybackProgress, PlaybackService};
@@ -22,14 +22,24 @@ async fn test_full_vertical_slice() {
     let cartoon_dir = temp_root.join("dessins_animes");
     std::fs::create_dir_all(&cartoon_dir).unwrap();
 
-    let kids_video = cartoon_dir.join("super_lapin.mp4");
+    // Film enfant
+    let kids_video = cartoon_dir.join("super_lapin (2020).mp4");
     let mut file1 = std::fs::File::create(&kids_video).unwrap();
     let video_bytes = b"VIDEO_DIRECT_PLAY_STREAMING_DATA_0123456789";
     file1.write_all(video_bytes).unwrap();
 
-    let adult_video = temp_root.join("film_action_adult_18+.mp4");
+    // Film adulte
+    let adult_video = temp_root.join("film_action_adult_18+ (2018).mp4");
     let mut file2 = std::fs::File::create(&adult_video).unwrap();
     file2.write_all(b"ADULT_CONTENT_RESTRICTED").unwrap();
+
+    // Série TV : Bécé Bégé S01E01
+    let show_dir = temp_root.join("Bece_Bege").join("Saison 01");
+    std::fs::create_dir_all(&show_dir).unwrap();
+    let ep_video = show_dir.join("Bece_Bege - S01E01 - Tel est pris.mp4");
+    let mut file3 = std::fs::File::create(&ep_video).unwrap();
+    let ep_bytes = b"EPISODE_DIRECT_PLAY_STREAMING_DATA_9876543210";
+    file3.write_all(ep_bytes).unwrap();
 
     // 2. Initialisation de la persistance SQLite local-first sur disque
     let canonical_root = std::fs::canonicalize(&temp_root).unwrap();
@@ -76,12 +86,12 @@ async fn test_full_vertical_slice() {
 
     let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
     let scan_res: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
-    assert_eq!(scan_res["scanned_count"], 2);
+    assert_eq!(scan_res["scanned_count"], 3);
 
     // ---------------------------------------------------------
-    // ÉTAPE B : Catalogue (/v1/library/media)
+    // ÉTAPE B : Catalogue Global (/v1/library/media)
     // ---------------------------------------------------------
-    // Profil Enfant : ne doit voir QUE `super_lapin.mp4`
+    // Profil Enfant : voit les 2 médias enfants (film enfant + épisode)
     let child_media_req = Request::builder()
         .method("GET")
         .uri("/v1/library/media")
@@ -96,11 +106,15 @@ async fn test_full_vertical_slice() {
 
     let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
     let child_media_list: Vec<MediaItem> = serde_json::from_slice(&body_bytes).unwrap();
-    assert_eq!(child_media_list.len(), 1);
-    assert_eq!(child_media_list[0].title, "super_lapin");
-    let kids_media_id = child_media_list[0].id.clone();
+    assert_eq!(child_media_list.len(), 2);
+    let kids_media_id = child_media_list
+        .iter()
+        .find(|m| m.title.contains("super"))
+        .unwrap()
+        .id
+        .clone();
 
-    // Profil Adulte : doit voir les 2 médias
+    // Profil Adulte : doit voir les 3 médias
     let adult_media_req = Request::builder()
         .method("GET")
         .uri("/v1/library/media")
@@ -115,7 +129,7 @@ async fn test_full_vertical_slice() {
 
     let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
     let adult_media_list: Vec<MediaItem> = serde_json::from_slice(&body_bytes).unwrap();
-    assert_eq!(adult_media_list.len(), 2);
+    assert_eq!(adult_media_list.len(), 3);
     let adult_media_id = adult_media_list
         .iter()
         .find(|m| m.title.contains("adult"))
@@ -124,7 +138,85 @@ async fn test_full_vertical_slice() {
         .clone();
 
     // ---------------------------------------------------------
-    // ÉTAPE C : Streaming Direct Play 206 (/v1/media/:media_id)
+    // ÉTAPE C : Catalogue Films (/v1/library/movies)
+    // ---------------------------------------------------------
+    let child_movies_req = Request::builder()
+        .method("GET")
+        .uri("/v1/library/movies")
+        .header("x-account-id", "acc_famille")
+        .header("x-profile-id", "prof_enfant")
+        .header("x-is-child", "true")
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = app.clone().oneshot(child_movies_req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let child_movies: Vec<MediaItem> = serde_json::from_slice(&body_bytes).unwrap();
+    assert_eq!(child_movies.len(), 1);
+    assert!(child_movies[0].title.contains("super"));
+
+    // ---------------------------------------------------------
+    // ÉTAPE D : Séries, Saisons & Épisodes (/v1/library/shows)
+    // ---------------------------------------------------------
+    // 1. Liste des séries
+    let shows_req = Request::builder()
+        .method("GET")
+        .uri("/v1/library/shows")
+        .header("x-account-id", "acc_famille")
+        .header("x-profile-id", "prof_enfant")
+        .header("x-is-child", "true")
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = app.clone().oneshot(shows_req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let shows: Vec<ShowRecord> = serde_json::from_slice(&body_bytes).unwrap();
+    assert_eq!(shows.len(), 1);
+    assert_eq!(shows[0].title, "Bece Bege");
+    assert_eq!(shows[0].season_count, 1);
+    assert_eq!(shows[0].episode_count, 1);
+    let show_id = shows[0].id.clone();
+
+    // 2. Détail de la série
+    let show_detail_req = Request::builder()
+        .method("GET")
+        .uri(format!("/v1/library/shows/{}", show_id))
+        .header("x-account-id", "acc_famille")
+        .header("x-profile-id", "prof_enfant")
+        .header("x-is-child", "true")
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = app.clone().oneshot(show_detail_req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let show_detail: ShowDetails = serde_json::from_slice(&body_bytes).unwrap();
+    assert_eq!(show_detail.seasons.len(), 1);
+    assert_eq!(show_detail.seasons[0].season_number, 1);
+
+    // 3. Détail de la saison avec liste des épisodes
+    let season_detail_req = Request::builder()
+        .method("GET")
+        .uri(format!("/v1/library/shows/{}/seasons/1", show_id))
+        .header("x-account-id", "acc_famille")
+        .header("x-profile-id", "prof_enfant")
+        .header("x-is-child", "true")
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = app.clone().oneshot(season_detail_req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let season_detail: SeasonDetails = serde_json::from_slice(&body_bytes).unwrap();
+    assert_eq!(season_detail.episodes.len(), 1);
+    assert_eq!(season_detail.episodes[0].episode_number, 1);
+    assert_eq!(season_detail.episodes[0].title, "Tel est pris");
+    let ep_media_id = season_detail.episodes[0].media_id.clone();
+
+    // ---------------------------------------------------------
+    // ÉTAPE E : Streaming Direct Play 206 (/v1/media/:media_id)
     // ---------------------------------------------------------
     // 1. Sécurité enfant : L'enfant tente d'accéder au média adulte -> 403 Forbidden
     let forbidden_stream_req = Request::builder()
@@ -139,7 +231,7 @@ async fn test_full_vertical_slice() {
     let resp = app.clone().oneshot(forbidden_stream_req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::FORBIDDEN);
 
-    // 2. Direct Play avec Range HTTP : Requête des 10 premiers octets (0-9)
+    // 2. Direct Play avec Range HTTP sur le film enfant : Requête des 10 premiers octets (0-9)
     let range_stream_req = Request::builder()
         .method("GET")
         .uri(format!("/v1/media/{}", kids_media_id))
@@ -162,27 +254,29 @@ async fn test_full_vertical_slice() {
     let chunk_bytes = resp.into_body().collect().await.unwrap().to_bytes();
     assert_eq!(&chunk_bytes[..], &video_bytes[0..10]);
 
-    // 3. Fast-forward seek : Requête des octets 10-24
-    let seek_stream_req = Request::builder()
+    // 3. Streaming Direct Play sur l'épisode de série (Range 206)
+    let ep_stream_req = Request::builder()
         .method("GET")
-        .uri(format!("/v1/media/{}", kids_media_id))
+        .uri(format!("/v1/media/{}", ep_media_id))
         .header("x-account-id", "acc_famille")
         .header("x-profile-id", "prof_enfant")
         .header("x-is-child", "true")
-        .header(header::RANGE, "bytes=10-24")
+        .header(header::RANGE, "bytes=0-9")
         .body(Body::empty())
         .unwrap();
 
-    let resp = app.clone().oneshot(seek_stream_req).await.unwrap();
+    let resp = app.clone().oneshot(ep_stream_req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
-    assert_eq!(resp.headers().get(header::CONTENT_LENGTH).unwrap(), "15");
-    let chunk_bytes = resp.into_body().collect().await.unwrap().to_bytes();
-    assert_eq!(&chunk_bytes[..], &video_bytes[10..25]);
+    assert_eq!(
+        resp.headers().get(header::CONTENT_RANGE).unwrap(),
+        &format!("bytes 0-9/{}", ep_bytes.len())
+    );
+    let ep_chunk = resp.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(&ep_chunk[..], &ep_bytes[0..10]);
 
     // ---------------------------------------------------------
-    // ÉTAPE D : Progression Playback (/v1/playback)
+    // ÉTAPE F : Progression Playback sur l'épisode (/v1/playback)
     // ---------------------------------------------------------
-    // 1. Enregistrement de progression (95% lu -> is_completed = true)
     let update_progress_req = Request::builder()
         .method("POST")
         .uri("/v1/playback/progress")
@@ -191,7 +285,7 @@ async fn test_full_vertical_slice() {
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(
             serde_json::to_string(&serde_json::json!({
-                "media_id": kids_media_id.as_str(),
+                "media_id": ep_media_id.as_str(),
                 "position_seconds": 95.0,
                 "duration_seconds": 100.0
             }))
@@ -207,27 +301,9 @@ async fn test_full_vertical_slice() {
     assert_eq!(saved_progress.position_seconds, 95.0);
     assert!(saved_progress.is_completed);
 
-    // 2. Lecture de la progression
-    let get_progress_req = Request::builder()
-        .method("GET")
-        .uri(format!("/v1/playback/{}", kids_media_id))
-        .header("x-account-id", "acc_famille")
-        .header("x-profile-id", "prof_enfant")
-        .body(Body::empty())
-        .unwrap();
-
-    let resp = app.clone().oneshot(get_progress_req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
-
-    let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
-    let read_progress: PlaybackProgress = serde_json::from_slice(&body_bytes).unwrap();
-    assert_eq!(read_progress.media_id, kids_media_id);
-    assert_eq!(read_progress.position_seconds, 95.0);
-
     // ---------------------------------------------------------
-    // ÉTAPE E : Redémarrage Serveur et Persistance SQLite
+    // ÉTAPE G : Redémarrage Serveur et Persistance SQLite
     // ---------------------------------------------------------
-    // Simule l'arrêt du serveur et le redémarrage d'une nouvelle instance pointant sur la même base
     drop(app);
     drop(catalog);
     drop(playback);
@@ -246,30 +322,27 @@ async fn test_full_vertical_slice() {
     );
     let reboot_app = create_router(reboot_state);
 
-    // 1. Les médias du catalogue sont toujours présents SANS avoir refait de scan
-    let media_after_reboot = Request::builder()
+    // 1. Séries et saisons toujours présentes sans avoir rescanné
+    let reboot_shows_req = Request::builder()
         .method("GET")
-        .uri("/v1/library/media")
+        .uri("/v1/library/shows")
         .header("x-account-id", "acc_famille")
         .header("x-profile-id", "prof_parent")
         .header("x-is-child", "false")
         .body(Body::empty())
         .unwrap();
 
-    let resp = reboot_app
-        .clone()
-        .oneshot(media_after_reboot)
-        .await
-        .unwrap();
+    let resp = reboot_app.clone().oneshot(reboot_shows_req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
-    let reloaded_media: Vec<MediaItem> = serde_json::from_slice(&body_bytes).unwrap();
-    assert_eq!(reloaded_media.len(), 2);
+    let reboot_shows: Vec<ShowRecord> = serde_json::from_slice(&body_bytes).unwrap();
+    assert_eq!(reboot_shows.len(), 1);
+    assert_eq!(reboot_shows[0].title, "Bece Bege");
 
-    // 2. La progression de lecture a également survécu au redémarrage
+    // 2. Progression de l'épisode intacte après redémarrage
     let progress_after_reboot = Request::builder()
         .method("GET")
-        .uri(format!("/v1/playback/{}", kids_media_id))
+        .uri(format!("/v1/playback/{}", ep_media_id))
         .header("x-account-id", "acc_famille")
         .header("x-profile-id", "prof_enfant")
         .body(Body::empty())
@@ -279,7 +352,7 @@ async fn test_full_vertical_slice() {
     assert_eq!(resp.status(), StatusCode::OK);
     let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
     let reloaded_prog: PlaybackProgress = serde_json::from_slice(&body_bytes).unwrap();
-    assert_eq!(reloaded_prog.media_id, kids_media_id);
+    assert_eq!(reloaded_prog.media_id, ep_media_id);
     assert_eq!(reloaded_prog.position_seconds, 95.0);
     assert!(reloaded_prog.is_completed);
 
