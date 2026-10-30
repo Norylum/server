@@ -16,6 +16,14 @@ target
 *.mp4
 *.avi
 *.m4v
+*.webm
+*.mov
+*.ts
+*.wmv
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.sqlite*
 
 # MSVC Windows builds of rustc generate these, which store debugging information
 *.pdb
