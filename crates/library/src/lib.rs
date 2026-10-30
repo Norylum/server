@@ -336,9 +336,15 @@ impl MediaScanner {
                                 Some(0)
                             };
 
+                        let parsed = norylum_metadata::parse_relative_path(&relative_path);
+                        let final_title = match parsed {
+                            norylum_metadata::ParsedName::Movie { title: m_title, .. } => m_title,
+                            _ => title,
+                        };
+
                         items.push(MediaItem {
                             id: media_id,
-                            title,
+                            title: final_title,
                             file_path: safe_path,
                             relative_path,
                             file_size: metadata.file_size,
