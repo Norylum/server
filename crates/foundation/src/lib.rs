@@ -69,6 +69,85 @@ impl_id_type!(MediaId, "med");
 impl_id_type!(ProfileId, "prof");
 impl_id_type!(AccountId, "acc");
 impl_id_type!(DeviceId, "dev");
+impl_id_type!(ShowId, "shw");
+impl_id_type!(SeasonId, "sea");
+impl_id_type!(EpisodeId, "epi");
+
+impl ShowId {
+    /// Génère un ShowId déterministe et stable à partir du chemin relatif normalisé du dossier de la série
+    pub fn from_path(relative_path: &str) -> Self {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(b"show:");
+        hasher.update(
+            relative_path
+                .replace('\\', "/")
+                .trim_matches('/')
+                .to_lowercase()
+                .as_bytes(),
+        );
+        let hex = format!("{:x}", hasher.finalize());
+        Self::new(format!("shw_{}", &hex[..16]))
+    }
+}
+
+impl SeasonId {
+    /// Génère un SeasonId déterministe et stable à partir du ShowId et du numéro de saison
+    pub fn from_show_and_season(show_id: &ShowId, season_number: u32) -> Self {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(b"season:");
+        hasher.update(show_id.as_str().as_bytes());
+        hasher.update(season_number.to_be_bytes());
+        let hex = format!("{:x}", hasher.finalize());
+        Self::new(format!("sea_{}", &hex[..16]))
+    }
+
+    /// Génère un SeasonId déterministe et stable à partir du chemin relatif normalisé du dossier de saison
+    pub fn from_path(relative_path: &str) -> Self {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(b"season_path:");
+        hasher.update(
+            relative_path
+                .replace('\\', "/")
+                .trim_matches('/')
+                .to_lowercase()
+                .as_bytes(),
+        );
+        let hex = format!("{:x}", hasher.finalize());
+        Self::new(format!("sea_{}", &hex[..16]))
+    }
+}
+
+impl EpisodeId {
+    /// Génère un EpisodeId déterministe et stable à partir du SeasonId et du numéro d'épisode
+    pub fn from_season_and_episode(season_id: &SeasonId, episode_number: u32) -> Self {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(b"episode:");
+        hasher.update(season_id.as_str().as_bytes());
+        hasher.update(episode_number.to_be_bytes());
+        let hex = format!("{:x}", hasher.finalize());
+        Self::new(format!("epi_{}", &hex[..16]))
+    }
+
+    /// Génère un EpisodeId déterministe et stable à partir du chemin relatif normalisé du fichier de l'épisode
+    pub fn from_path(relative_path: &str) -> Self {
+        use sha2::{Digest, Sha256};
+        let mut hasher = Sha256::new();
+        hasher.update(b"episode_path:");
+        hasher.update(
+            relative_path
+                .replace('\\', "/")
+                .trim_matches('/')
+                .to_lowercase()
+                .as_bytes(),
+        );
+        let hex = format!("{:x}", hasher.finalize());
+        Self::new(format!("epi_{}", &hex[..16]))
+    }
+}
 
 /// Erreurs standardisées du monolithe Norylum
 #[derive(Debug, thiserror::Error)]
@@ -223,6 +302,23 @@ mod tests {
 
         let rnd = MediaId::random();
         assert!(rnd.as_str().starts_with("med_"));
+
+        let show_id = ShowId::from_path("Bécé Bégé");
+        assert!(show_id.as_str().starts_with("shw_"));
+        assert_eq!(show_id, ShowId::from_path("Bécé Bégé"));
+        assert_ne!(show_id, ShowId::from_path("Other Show"));
+
+        let season_id = SeasonId::from_show_and_season(&show_id, 1);
+        assert!(season_id.as_str().starts_with("sea_"));
+        assert_eq!(season_id, SeasonId::from_show_and_season(&show_id, 1));
+        assert_ne!(season_id, SeasonId::from_show_and_season(&show_id, 2));
+
+        let episode_id = EpisodeId::from_season_and_episode(&season_id, 3);
+        assert!(episode_id.as_str().starts_with("epi_"));
+        assert_eq!(
+            episode_id,
+            EpisodeId::from_season_and_episode(&season_id, 3)
+        );
     }
 
     #[test]
