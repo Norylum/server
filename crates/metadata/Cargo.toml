@@ -7,4 +7,5 @@ license.workspace = true
 [dependencies]
 norylum-foundation = { path = "../foundation" }
 serde.workspace = true
+regex.workspace = true
 
