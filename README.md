@@ -1,2 +1,159 @@
-# server
-Serveur média auto-hébergé (Monolithe modulaire Rust).
+# Norylum Server
+
+**IA-Propelled — Propulsé par l'Intelligence Artificielle**
+
+Serveur multimédia auto-hébergé, développé en Rust selon une architecture monolithe modulaire.
+
+## 🤖 Un projet développé par l'IA
+
+**Norylum est un projet IA-Propelled : son développement est réalisé avec l'intelligence artificielle, sous direction et supervision humaine.**
+
+L'intelligence artificielle participe directement à :
+
+- La conception de l'architecture logicielle.
+- L'écriture et l'évolution du code source.
+- L'implémentation des fonctionnalités.
+- La création des tests automatisés.
+- L'identification et la correction des problèmes.
+- La documentation et l'amélioration continue.
+
+Le mainteneur humain définit les objectifs, pilote les décisions techniques, exécute les validations et contrôle les commits et les publications.
+
+Ce modèle de développement repose sur une collaboration entre intelligence artificielle et supervision humaine.
+
+**AI-Propelled Development — Human-Directed, AI-Built.**
+
+## 🎯 Objectif
+
+Construire un serveur multimédia moderne, performant, modulaire et auto-hébergé, permettant de gérer, organiser et diffuser une bibliothèque personnelle de films et séries.
+
+## 🦀 Technologies
+
+- Rust — Langage principal
+- Tokio — Exécution asynchrone
+- Axum — API HTTP
+- SQLite — Persistance locale
+- FFprobe — Inspection des médias
+- Cargo — Workspace, compilation et tests
+
+## 🏗️ Architecture
+
+Norylum Server utilise un monolithe modulaire Rust.
+
+```text
+server/
+├── apps/
+│   └── norylum-server/
+├── crates/
+│   ├── api/
+│   ├── auth/
+│   ├── authorization/
+│   ├── catalog/
+│   ├── devices/
+│   ├── foundation/
+│   ├── identity/
+│   ├── library/
+│   ├── metadata/
+│   ├── persistence/
+│   ├── playback/
+│   ├── profiles/
+│   ├── runtime/
+│   └── streaming/
+└── shared/
+    ├── api-types/
+    └── test-support/
+```
+
+Les modules sont organisés par responsabilité afin de faciliter la maintenance, les tests et les évolutions futures.
+
+## ✅ Fonctionnalités implémentées
+
+- Scan des bibliothèques multimédias.
+- Indexation des films et séries.
+- Organisation des saisons et épisodes.
+- Analyse des noms de fichiers.
+- Extraction des métadonnées techniques.
+- Stockage SQLite avec mode WAL.
+- Identifiants de médias stables.
+- Streaming Direct Play.
+- Support HTTP 200 et 206 Partial Content.
+- Sauvegarde de la progression de lecture.
+- Contrôles d'autorisation initiaux.
+- Tests unitaires et d'intégration.
+
+## 🚧 Développement en cours
+
+Les prochaines étapes concernent notamment :
+
+- Authentification réelle des utilisateurs.
+- Comptes et profils.
+- Gestion des appareils.
+- Métadonnées enrichies et affiches.
+- Reprise de lecture entre appareils.
+- Transcodage et streaming adaptatif.
+- Sécurisation et déploiement en production.
+
+Les modules présents dans le workspace ne sont pas tous entièrement implémentés.
+
+**Attention :** les en-têtes d'identité utilisés actuellement ne constituent pas une authentification sécurisée. Le serveur ne doit pas être exposé publiquement dans cet état.
+
+## 🚀 Développement local
+
+Compiler le workspace :
+
+```bash
+cargo build --workspace
+```
+
+Vérifier le code :
+
+```bash
+cargo check --workspace
+```
+
+Exécuter les tests :
+
+```bash
+cargo test --workspace
+```
+
+Vérifier le formatage :
+
+```bash
+cargo fmt --all -- --check
+```
+
+Analyser le code avec Clippy :
+
+```bash
+cargo clippy --workspace --all-targets
+```
+
+Démarrer le serveur :
+
+```bash
+cargo run -p norylum-server
+```
+
+Par défaut, le serveur écoute sur :
+
+`http://127.0.0.1:8120`
+
+Le répertoire multimédia peut être configuré avec la variable `NORYLUM_MEDIA_DIR`.
+
+## 🌿 Stratégie de développement
+
+- `dev` : branche active de développement.
+- `main` : branche de référence pour les versions stabilisées.
+
+Les changements sont validés par compilation, tests et revue avant publication.
+
+## 📜 Licence
+
+GPL-3.0-or-later.
+
+---
+
+**Norylum — IA-Propelled Project**
+
+*Designed with AI. Built with AI. Directed by humans.*
