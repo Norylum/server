@@ -23,6 +23,8 @@ pub(crate) struct SwitchProfilePayload {
     profile_id: ProfileId,
     #[serde(default)]
     account_password: Option<String>,
+    #[serde(default)]
+    profile_pin: Option<String>,
 }
 
 fn bearer(headers: &HeaderMap) -> Result<&str, NorylumError> {
@@ -113,10 +115,11 @@ pub(crate) async fn switch_profile_handler(
     Json(payload): Json<SwitchProfilePayload>,
 ) -> Result<Json<LoginResponse>, NorylumError> {
     Ok(Json(
-        auth.switch_profile_with_password(
+        auth.switch_profile_with_credentials(
             bearer(&headers)?,
             &payload.profile_id,
             payload.account_password.as_deref(),
+            payload.profile_pin.as_deref(),
         )
         .await?,
     ))
@@ -157,5 +160,47 @@ pub(crate) async fn delete_profile_handler(
     Path(profile_id): Path<ProfileId>,
 ) -> Result<StatusCode, NorylumError> {
     profiles.delete(&ctx, &profile_id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+pub(crate) struct SetProfilePinPayload {
+    pin: String,
+    account_password: String,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct DeleteProfilePinPayload {
+    account_password: String,
+}
+
+/// PUT /v1/profiles/:profile_id/pin
+pub(crate) async fn set_profile_pin_handler(
+    State(auth): State<Arc<AuthService>>,
+    headers: HeaderMap,
+    Path(profile_id): Path<ProfileId>,
+    Json(payload): Json<SetProfilePinPayload>,
+) -> Result<StatusCode, NorylumError> {
+    auth.set_profile_pin(
+        bearer(&headers)?,
+        &profile_id,
+        &payload.account_password,
+        &payload.pin,
+    )
+    .await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// DELETE /v1/profiles/:profile_id/pin
+pub(crate) async fn delete_profile_pin_handler(
+    State(auth): State<Arc<AuthService>>,
+    headers: HeaderMap,
+    Path(profile_id): Path<ProfileId>,
+    Json(payload): Json<DeleteProfilePinPayload>,
+) -> Result<StatusCode, NorylumError> {
+    auth.delete_profile_pin(bearer(&headers)?, &profile_id, &payload.account_password)
+        .await?;
+
     Ok(StatusCode::NO_CONTENT)
 }

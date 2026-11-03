@@ -18,6 +18,27 @@ Elles ne constituent pas des publications de versions stables.
 
 ## [Unreleased]
 
+### Profiles V3 — 2026-11-03
+
+**Added**
+- PIN de 6 a 8 chiffres pour les profils adultes.
+- Configuration et suppression des PIN via l'API.
+- Hachage Argon2id avec sel aleatoire.
+- Migration SQLite additive et idempotente.
+- Tests unitaires des PIN et de leur verrouillage.
+- Tests HTTP des nouvelles routes.
+
+**Security**
+- Gestion du PIN reservee au profil principal avec
+  verification du mot de passe du compte.
+- Verrouillage du PIN pendant 15 minutes apres
+  cinq tentatives incorrectes.
+- Revocation des sessions lors d'un changement de PIN.
+- Suppression du PIN lors du passage en profil enfant.
+- Mot de passe du compte conserve pour la recuperation.
+
+---
+
 Les changements en cours de développement seront documentés
 ici avant leur intégration dans une version publiée.
 

@@ -14,6 +14,8 @@ use uuid::Uuid;
 
 const SESSION_LIFETIME: i64 = 7 * 24 * 60 * 60;
 
+mod pin;
+
 fn storage(error: impl std::fmt::Display) -> NorylumError {
     NorylumError::Internal(format!("Erreur auth SQLite : {error}"))
 }
@@ -294,115 +296,15 @@ impl AuthService {
             .await
     }
 
-    /// Le mot de passe du compte est obligatoire
-    /// lorsque le profil cible est adulte.
-    ///
-    /// La verification du jeton source, du profil cible
-    /// et la creation de session forment une transaction.
+    /// Compatibilite avec les appels V2.
     pub async fn switch_profile_with_password(
         &self,
         token: &str,
         profile_id: &ProfileId,
         account_password: Option<&str>,
     ) -> Result<LoginResponse, NorylumError> {
-        if token.len() != 64 || !token.bytes().all(|c| c.is_ascii_hexdigit()) {
-            return Err(rejected());
-        }
-
-        let incoming_hash = digest(token);
-        let new_token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
-        let new_hash = digest(&new_token);
-        let now = Utc::now().timestamp();
-        let expires_at = now + SESSION_LIFETIME;
-
-        let account_id = self
-            .db
-            .with_connection(|conn| {
-                let tx = conn
-                    .transaction_with_behavior(TransactionBehavior::Immediate)
-                    .map_err(storage)?;
-
-                let source: Option<(String, i64)> = tx
-                    .query_row(
-                        "SELECT s.account_id, p.is_child
-                     FROM auth_sessions s
-                     JOIN profiles p
-                       ON p.id = s.profile_id
-                      AND p.account_id = s.account_id
-                     WHERE s.token_hash = ?1
-                       AND s.expires_at > ?2",
-                        params![incoming_hash, now],
-                        |row| Ok((row.get(0)?, row.get(1)?)),
-                    )
-                    .optional()
-                    .map_err(storage)?;
-
-                let (account, source_child) = source.ok_or_else(rejected)?;
-
-                if source_child != 0 {
-                    return Err(NorylumError::Forbidden(
-                        "Changement de profil interdit aux enfants".into(),
-                    ));
-                }
-
-                let target_child: Option<i64> = tx
-                    .query_row(
-                        "SELECT is_child FROM profiles
-                     WHERE id = ?1 AND account_id = ?2",
-                        params![profile_id.as_str(), account],
-                        |row| row.get(0),
-                    )
-                    .optional()
-                    .map_err(storage)?;
-
-                let target_child = target_child
-                    .ok_or_else(|| NorylumError::Forbidden("Profil inaccessible".into()))?;
-
-                if target_child == 0 {
-                    let password = account_password.ok_or_else(|| {
-                        NorylumError::Forbidden(
-                            "Mot de passe du compte requis pour un profil adulte".into(),
-                        )
-                    })?;
-
-                    let encoded: String = tx
-                        .query_row(
-                            "SELECT password_hash FROM accounts
-                         WHERE id = ?1",
-                            params![account],
-                            |row| row.get(0),
-                        )
-                        .map_err(storage)?;
-
-                    let parsed = PasswordHash::new(&encoded).map_err(|_| rejected())?;
-
-                    Argon2::default()
-                        .verify_password(password.as_bytes(), &parsed)
-                        .map_err(|_| {
-                            NorylumError::Forbidden("Mot de passe du compte invalide".into())
-                        })?;
-                }
-
-                tx.execute(
-                    "INSERT INTO auth_sessions
-                 (token_hash, account_id, profile_id, expires_at)
-                 VALUES (?1, ?2, ?3, ?4)",
-                    params![new_hash, account, profile_id.as_str(), expires_at,],
-                )
-                .map_err(storage)?;
-
-                tx.commit().map_err(storage)?;
-                Ok(AccountId::new(account))
-            })
-            .await?;
-
-        Ok(LoginResponse {
-            access_token: new_token,
-            token_type: "Bearer",
-            expires_in: SESSION_LIFETIME as u64,
-            account_id,
-            profile_id: profile_id.clone(),
-        })
+        self.switch_profile_with_credentials(token, profile_id, account_password, None)
+            .await
     }
 }
 

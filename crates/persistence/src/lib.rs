@@ -254,6 +254,34 @@ impl Database {
         conn.execute_batch(include_str!("auth_migration.sql"))
             .map_err(|e| NorylumError::Internal(format!("Migration auth SQLite: {e}")))?;
 
+        // Migration additive et idempotente des PIN de profils.
+        // Les donnees existantes ne sont pas effacees.
+        let profile_columns: Vec<String> = {
+            let mut statement = conn
+                .prepare("PRAGMA table_info(profiles)")
+                .map_err(|e| NorylumError::Internal(e.to_string()))?;
+
+            let rows = statement
+                .query_map([], |row| row.get::<_, String>(1))
+                .map_err(|e| NorylumError::Internal(e.to_string()))?;
+
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(|e| NorylumError::Internal(e.to_string()))?
+        };
+
+        for (column, definition) in [
+            ("pin_hash", "TEXT"),
+            ("pin_failures", "INTEGER NOT NULL DEFAULT 0"),
+            ("pin_locked_until", "INTEGER NOT NULL DEFAULT 0"),
+        ] {
+            if !profile_columns.iter().any(|name| name == column) {
+                conn.execute_batch(&format!(
+                    "ALTER TABLE profiles ADD COLUMN {column} {definition}"
+                ))
+                .map_err(|e| NorylumError::Internal(format!("Migration PIN {column}: {e}")))?;
+            }
+        }
+
         tracing::info!(
             "Base SQLite Norylum initialisée avec succès (WAL activé, migrations appliquées)"
         );

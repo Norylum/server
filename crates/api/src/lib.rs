@@ -237,6 +237,12 @@ pub fn create_router(state: AppState) -> Router {
                 .delete(auth_routes::delete_profile_handler)
                 .with_state(profiles),
         )
+        .route(
+            "/v1/profiles/:profile_id/pin",
+            axum::routing::put(auth_routes::set_profile_pin_handler)
+                .delete(auth_routes::delete_profile_pin_handler)
+                .with_state(auth.clone()),
+        )
         .route("/v1/auth/me", axum::routing::get(auth_routes::me_handler))
         .route(
             "/v1/auth/logout",

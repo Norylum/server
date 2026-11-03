@@ -135,7 +135,13 @@ impl ProfileService {
                     "UPDATE profiles
                      SET name = ?3,
                          is_child = ?4,
-                         age_rating_max = ?5
+                         age_rating_max = ?5,
+                         pin_hash = CASE
+                             WHEN ?4 != 0 THEN NULL
+                             ELSE pin_hash
+                         END,
+                         pin_failures = 0,
+                         pin_locked_until = 0
                      WHERE id = ?1 AND account_id = ?2",
                     params![
                         profile_id.as_str(),

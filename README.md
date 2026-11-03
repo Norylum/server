@@ -239,3 +239,33 @@ Le développement de Norylum est documenté dans le
 
 Chaque étape importante y est enregistrée avec sa date,
 ses fonctionnalités et les commits correspondants.
+
+
+## Profiles V3 — Codes PIN
+
+Les profils adultes peuvent recevoir un PIN de 6 a 8 chiffres.
+
+- `PUT /v1/profiles/:profile_id/pin` : definir ou remplacer un PIN.
+- `DELETE /v1/profiles/:profile_id/pin` : supprimer un PIN.
+- `POST /v1/auth/switch-profile` : utiliser `profile_pin`
+  pour acceder a un profil adulte protege.
+
+Les operations de gestion d'un PIN sont reservees au profil
+principal et exigent `account_password`.
+
+Un PIN est hache avec Argon2id. Sa valeur n'est jamais
+retournee par l'API.
+
+Apres cinq tentatives PIN incorrectes, le PIN est verrouille
+pendant quinze minutes. L'etat est persiste dans SQLite.
+
+Le mot de passe du compte reste la methode de recuperation :
+il permet au proprietaire du compte de debloquer un profil.
+
+Les modifications de PIN revoquent les sessions du profil.
+Un profil enfant ne peut pas obtenir de PIN ni changer
+de profil depuis sa propre session.
+
+Le PIN est une protection d'usage familial et ne remplace
+pas une authentification forte ou une exposition HTTPS
+securisee. L'API reste destinee au developpement local.
