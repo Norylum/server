@@ -1147,3 +1147,19 @@ Before fetching, the future network worker must also enforce:
 DNS/IP protections against SSRF and rebinding, no redirects,
 strict TLS verification, size/time limits, digest verification
 and a validated Gluetun kill switch.
+
+
+## Architecture modulaire et VPN
+
+- Serveur Rust headless fonctionnel sans frontend.
+- Frontend Web facultatif, conteneur separe (prevu).
+- Direct Play prioritaire, transcodage GPU a la demande
+  avec detection des capacites (prevu).
+- Recherche de sources par fournisseurs interchangeables
+  (prevue).
+- Seeder BitTorrent opt-in et Gluetun optionnel.
+- Aucun magnet ou telechargement torrent automatique
+  pour le moment.
+
+Guide de configuration et validation :
+[docs/NORDVPN_TORRENT.md](docs/NORDVPN_TORRENT.md).
