@@ -20,6 +20,14 @@ Norylum Docker
   scripts/norylum-docker.sh status   Etat et URL locale
   scripts/norylum-docker.sh scan     Scan authentifie sans token manuel
   scripts/norylum-docker.sh jobs     Journal d'ingestion authentifie
+  scripts/norylum-docker.sh vpn-start
+                                    Demarrer Gluetun puis seeder
+  scripts/norylum-docker.sh vpn-status
+                                    Afficher la sante du VPN
+  scripts/norylum-docker.sh vpn-stop
+                                    Arreter le VPN sans arreter Norylum
+  scripts/norylum-docker.sh acquisition-requests
+                                    Lister les demandes authentifiees
   scripts/norylum-docker.sh torrent-enable MEDIA_ID
                                     Activer explicitement un partage BitTorrent
   scripts/norylum-docker.sh torrent-disable MEDIA_ID
@@ -276,6 +284,125 @@ print(json.load(sys.stdin)["access_token"])
   printf '\n'
 }
 
+vpn_check_config() {
+  require_config
+
+  local provider protocol
+
+  provider="$(sed -n 's/^NORYLUM_VPN_PROVIDER=//p' .env | tail -1)"
+  protocol="$(sed -n 's/^NORYLUM_VPN_TYPE=//p' .env | tail -1)"
+
+  protocol="${protocol:-wireguard}"
+
+  case "$provider" in
+    protonvpn|mullvad|airvpn|nordvpn|"private internet access") ;;
+    *)
+      echo "VPN non configure ou fournisseur non supporte" >&2
+      return 1
+      ;;
+  esac
+
+  case "$protocol" in
+    wireguard)
+      if [[ "$provider" == "private internet access" ]]; then
+        echo "PIA : utiliser OpenVPN pour cette premiere version" >&2
+        return 1
+      fi
+
+      if [[ ! -s config/vpn/wireguard_private_key ||
+            -L config/vpn/wireguard_private_key ]]; then
+        echo "Cle WireGuard absente ou non fiable" >&2
+        return 1
+      fi
+
+      if [[ "$provider" == mullvad || "$provider" == airvpn ]]; then
+        if [[ ! -s config/vpn/wireguard_addresses ||
+              -L config/vpn/wireguard_addresses ]]; then
+          echo "Adresses WireGuard absentes ou non fiables" >&2
+          return 1
+        fi
+      fi
+
+      if [[ "$provider" == airvpn ]]; then
+        if [[ ! -s config/vpn/wireguard_preshared_key ||
+              -L config/vpn/wireguard_preshared_key ]]; then
+          echo "Cle AirVPN preshared absente ou non fiable" >&2
+          return 1
+        fi
+      fi
+      ;;
+    openvpn)
+      if [[ "$provider" == mullvad ]]; then
+        echo "Mullvad : utiliser WireGuard" >&2
+        return 1
+      fi
+
+      if [[ ! -s config/vpn/openvpn_user ||
+            ! -s config/vpn/openvpn_password ||
+            -L config/vpn/openvpn_user ||
+            -L config/vpn/openvpn_password ]]; then
+        echo "Identifiants OpenVPN absents ou non fiables" >&2
+        return 1
+      fi
+      ;;
+    *)
+      echo "Protocole VPN non supporte" >&2
+      return 1
+      ;;
+  esac
+
+  echo "OK : configuration VPN presente"
+}
+
+vpn_status() {
+  local cid health
+
+  cid="$("${DC[@]}" --profile torrent ps -q gluetun)"
+
+  if [[ -z "$cid" ]]; then
+    echo "VPN inactif"
+    return 1
+  fi
+
+  health="$(docker inspect \
+    --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}unknown{{end}}' \
+    "$cid")" || return 1
+
+  echo "Etat Gluetun : $health"
+  [[ "$health" == healthy ]]
+}
+
+vpn_wait_healthy() {
+  local i
+
+  for ((i=0; i<45; i++)); do
+    if vpn_status >/dev/null 2>&1; then
+      echo "OK : Gluetun healthy"
+      return 0
+    fi
+    sleep 2
+  done
+
+  echo "ERREUR : Gluetun non healthy, seeder bloque" >&2
+  return 1
+}
+
+vpn_stop() {
+  # Stop only VPN-dependent services, never the main Norylum API.
+  "${DC[@]}" --profile torrent stop seeder gluetun
+}
+
+vpn_start() {
+  # No old seeder may remain running while the VPN is checked.
+  "${DC[@]}" --profile torrent stop seeder >/dev/null 2>&1 || true
+  vpn_check_config || return 1
+  "${DC[@]}" --profile torrent up -d gluetun || return 1
+  vpn_wait_healthy || return 1
+
+  # Preserve dependency and health checks.
+  "${DC[@]}" --profile torrent up -d seeder
+}
+
 torrent_enable() {
   local id="${1:-}"
 
@@ -297,10 +424,9 @@ torrent_enable() {
     return 0
   fi
 
-  torrent_api POST     "/v1/torrent/media/$id/enable"     '{"confirm_distribution_rights":true}'
+  vpn_start || return 1
 
-  # Launches the coordinator; it reads the SQLite queue.
-  "${DC[@]}" --profile torrent up     -d --no-deps seeder
+  torrent_api POST     "/v1/torrent/media/$id/enable"     '{"confirm_distribution_rights":true}'
 }
 
 torrent_disable() {
@@ -374,20 +500,20 @@ torrent_cleanup() {
 
   echo "Verification du snapshot : $id"
 
-  if "${DC[@]}" --profile torrent run \
+  if "${DC[@]}" --profile maintenance run \
       --rm --no-deps \
       --entrypoint /usr/local/bin/norylum-torrent-cleanup \
-      seeder --media-id "$id"; then
+      maintenance --media-id "$id"; then
 
     printf "Supprimer uniquement ce snapshot (ecrire SUPPRIMER) : "
     local answer
     IFS= read -r answer
 
     if [[ "$answer" == "SUPPRIMER" ]]; then
-      if ! "${DC[@]}" --profile torrent run \
+      if ! "${DC[@]}" --profile maintenance run \
           --rm --no-deps \
           --entrypoint /usr/local/bin/norylum-torrent-cleanup \
-          seeder --media-id "$id" --apply; then
+          maintenance --media-id "$id" --apply; then
         result=1
       fi
     else
@@ -398,8 +524,7 @@ torrent_cleanup() {
   fi
 
   if (( running == 1 )); then
-    "${DC[@]}" --profile torrent up -d --no-deps seeder ||
-      result=1
+    vpn_start || result=1
   fi
 
   return "$result"
@@ -413,22 +538,24 @@ case "${1:-}" in
   setup) setup ;;
   start)
     if [[ ! -f .env ]]; then echo 'Executer setup avant start' >&2; exit 1; fi
+    "${DC[@]}" --profile torrent stop seeder >/dev/null 2>&1 || true
     "${DC[@]}" up -d --build server
-    # Idle coordinator does not start librqbit until SQLite authorizes a seed.
-    "${DC[@]}" --profile torrent up -d --no-deps seeder
-    "${DC[@]}" --profile torrent ps
+    echo "Seeder arrete : utiliser vpn-start apres configuration."
+    "${DC[@]}" ps
     ;;
   stop) "${DC[@]}" --profile torrent down ;;
   update)
     require_config
     require_clean_dev
     backup_db
+    "${DC[@]}" --profile torrent stop seeder >/dev/null 2>&1 || true
     git pull --ff-only origin dev
     "${DC[@]}" build --pull
     "${DC[@]}" up -d --no-deps --force-recreate server
     wait_healthy
-    "${DC[@]}" --profile torrent up       -d --no-deps --force-recreate seeder
-    "${DC[@]}" --profile torrent ps
+    echo "Seeder arrete par securite apres mise a jour."
+    echo "Utiliser vpn-start pour le relancer via Gluetun."
+    "${DC[@]}" ps
     ;;
   backup) require_config; backup_db ;;
   doctor) scripts/norylum-doctor.sh ;;
@@ -437,6 +564,10 @@ case "${1:-}" in
   status) "${DC[@]}" ps; echo "URL locale : http://127.0.0.1:$(sed -n 's/^NORYLUM_PORT=//p' .env | head -1)" ;;
   scan) scan ;;
   jobs) api_call /v1/library/ingest/jobs ;;
+  vpn-start) vpn_start ;;
+  vpn-status) vpn_status ;;
+  vpn-stop) vpn_stop ;;
+  acquisition-requests) torrent_api GET /v1/acquisition/requests ;;
   torrent-enable) torrent_enable "${2:-}" ;;
   torrent-limit) torrent_limit "${2:-}" ;;
   torrent-disable) torrent_disable "${2:-}" ;;

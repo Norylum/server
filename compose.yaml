@@ -34,11 +34,33 @@ services:
       retries: 3
       start_period: 30s
 
+  gluetun:
+    profiles:
+      - torrent
+    image: qmcgaw/gluetun:v3.41.3
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    environment:
+      VPN_SERVICE_PROVIDER: ${NORYLUM_VPN_PROVIDER:-protonvpn}
+      VPN_TYPE: ${NORYLUM_VPN_TYPE:-wireguard}
+      SERVER_COUNTRIES: ${NORYLUM_VPN_COUNTRIES:-}
+      VPN_PORT_FORWARDING: "off"
+    volumes:
+      - ./config/vpn:/run/secrets:ro
+
   seeder:
     profiles:
       - torrent
+    network_mode: "service:gluetun"
     image: norylum-server:local
     depends_on:
+      gluetun:
+        condition: service_healthy
       server:
         condition: service_healthy
     user: "${NORYLUM_UID:?Run setup}:${NORYLUM_GID:?Run setup}"
@@ -56,6 +78,22 @@ services:
       RUST_LOG: ${NORYLUM_RUST_LOG:-info}
     volumes:
       - ./media:/data/media
-    ports:
-      - "${NORYLUM_TORRENT_BIND_IP:-127.0.0.1}:${NORYLUM_TORRENT_PORT:-6881}:6881/tcp"
-      - "${NORYLUM_TORRENT_BIND_IP:-127.0.0.1}:${NORYLUM_TORRENT_PORT:-6881}:6881/udp"
+
+
+  maintenance:
+    profiles:
+      - maintenance
+    image: norylum-server:local
+    network_mode: "none"
+    user: "${NORYLUM_UID:?Run setup}:${NORYLUM_GID:?Run setup}"
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    command:
+      - norylum-torrent-cleanup
+    environment:
+      NORYLUM_MEDIA_DIR: /data/media
+    volumes:
+      - ./media:/data/media

@@ -1011,3 +1011,77 @@ The test is ignored by default to prevent accidental
 process or network startup during ordinary CI runs.
 
 This is not a two-peer data transfer benchmark.
+
+## Acquisition V1 - VPN and authenticated requests
+
+Norylum separates the API from the network workers.
+
+Network security:
+- Gluetun is mandatory for the torrent seeder.
+- Seeder uses network_mode: service:gluetun.
+- No torrent ports are published by default.
+- Only Gluetun receives NET_ADMIN.
+- Local cleanup runs with network_mode: none.
+- VPN credentials are read from config/vpn/.
+- Missing credentials prevent vpn-start.
+- Norylum server remains accessible independently.
+
+Supported providers:
+- protonvpn (recommended)
+- mullvad (recommended)
+- airvpn
+- nordvpn
+- private internet access (OpenVPN initially)
+
+Local configuration keys in .env:
+
+    NORYLUM_VPN_PROVIDER=protonvpn
+    NORYLUM_VPN_TYPE=wireguard
+
+Secret file names in config/vpn/:
+
+    wireguard_private_key
+    wireguard_addresses
+    wireguard_preshared_key
+    openvpn_user
+    openvpn_password
+
+Only create files required by the selected provider.
+Do not store credential values in .env or Git.
+
+Start the VPN and seeder explicitly:
+
+    scripts/norylum-docker.sh vpn-start
+    scripts/norylum-docker.sh vpn-status
+
+The VPN tunnel and kill switch must be tested before
+authorizing any real network acquisition or seeding.
+
+Authenticated acquisition requests:
+
+    POST /v1/acquisition/requests
+    GET /v1/acquisition/requests
+    GET /v1/acquisition/requests/:id
+
+Example POST body:
+
+    {
+      "kind": "movie",
+      "tmdb_id": 603,
+      "quality_profile": "1080p",
+      "language": "fr"
+    }
+
+The client must provide a valid Bearer access token.
+Acquisition V1 currently requires the principal profile.
+
+The POST request returns HTTP 202.
+Requests are persisted in SQLite with status
+awaiting_approval.
+
+No download starts when a request is registered.
+Source selection, approval and the acquisition worker
+are future stages.
+
+TMDB identifies content but does not provide the
+downloadable video file.

@@ -13,6 +13,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+mod acquisition;
+pub use acquisition::AcquisitionRequest;
+
 mod torrent;
 pub use torrent::{TorrentSettings, TorrentShare};
 
@@ -298,6 +301,9 @@ impl Database {
 
         conn.execute_batch(include_str!("metadata_migration.sql"))
             .map_err(|e| NorylumError::Internal(format!("Migration metadata SQLite : {e}")))?;
+
+        conn.execute_batch(include_str!("acquisition_migration.sql"))
+            .map_err(|e| NorylumError::Internal(format!("Migration Acquisition V1 : {e}")))?;
 
         conn.execute_batch(include_str!("torrent_migration.sql"))
             .map_err(|e| NorylumError::Internal(format!("Migration Torrent V2 : {e}")))?;

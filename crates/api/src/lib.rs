@@ -2,6 +2,7 @@
 //! Assemble les routes HTTP Axum, gère l'état partagé `AppState` et unifie
 //! le catalogue, la bibliothèque, les films, les séries/saisons/épisodes, le streaming et la progression.
 
+mod acquisition_routes;
 mod auth_routes;
 mod device_routes;
 mod ingestion_routes;
@@ -241,6 +242,18 @@ pub fn create_router(state: AppState) -> Router {
         )
         .with_state(metadata_state);
 
+    let acquisition_routes = Router::new()
+        .route(
+            "/requests",
+            axum::routing::get(acquisition_routes::list_handler)
+                .post(acquisition_routes::create_handler),
+        )
+        .route(
+            "/requests/:id",
+            axum::routing::get(acquisition_routes::get_handler),
+        )
+        .with_state(state.clone());
+
     let torrent_routes = Router::new()
         .route("/shares", axum::routing::get(torrent_routes::list_handler))
         .route(
@@ -317,6 +330,7 @@ pub fn create_router(state: AppState) -> Router {
 
     let protected = Router::new()
         .nest("/v1/library", library_routes)
+        .nest("/v1/acquisition", acquisition_routes)
         .nest("/v1/torrent", torrent_routes)
         .nest("/v1/media", streaming_routes)
         .nest("/v1/playback", playback_routes)

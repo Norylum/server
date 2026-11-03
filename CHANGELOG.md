@@ -18,6 +18,19 @@ Elles ne constituent pas des publications de versions stables.
 
 ## [Unreleased]
 
+### Acquisition V1 - Initial security and request foundation
+
+- Added Gluetun network isolation for torrent seeding.
+- Removed direct seeder port publishing.
+- Added explicit VPN startup and health gating.
+- Added offline, networkless torrent maintenance.
+- Added SQLite-backed authenticated acquisition requests.
+- Added request deduplication and profile isolation.
+- Added initial acquisition API security tests.
+- Downloads remain disabled until VPN validation.
+
+
+
 ### Torrent V3 - Isolated lifecycle validation
 
 - Added an explicit, ignored E2E integration test.
