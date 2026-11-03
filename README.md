@@ -193,3 +193,30 @@ Ne pas exposer directement le serveur sur Internet.
 Avant tout deploiement public, ajouter HTTPS, limitation des
 tentatives de connexion, gestion complete des profils et
 durcissement de la configuration.
+
+
+## Gestion des profils V1
+
+Les profils sont persistants dans SQLite et isoles par compte.
+
+- `GET /v1/profiles` : lister les profils visibles.
+- `POST /v1/profiles` : creer un profil adulte ou enfant.
+- `POST /v1/auth/switch-profile` : obtenir une session pour un profil.
+
+La creation est reservee au profil principal du compte.
+Un profil enfant ne peut voir que son propre profil dans
+la liste et ne peut pas en creer un autre.
+
+Exemple de creation de profil enfant :
+
+```json
+{
+  "name": "Junior",
+  "is_child": true,
+  "age_rating_max": 10
+}
+```
+
+Cette premiere version ne comprend pas encore les codes PIN
+de profil, la modification ou la suppression des profils.
+Ne pas exposer le serveur publiquement.

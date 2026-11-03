@@ -14,6 +14,7 @@ use norylum_catalog::{CatalogService, SeasonDetails, ShowDetails, ShowRecord};
 use norylum_foundation::{NorylumError, ShowId};
 use norylum_library::{MediaItem, MediaScanner};
 use norylum_playback::{PlaybackService, PlaybackState};
+use norylum_profiles::ProfileService;
 use norylum_streaming::StreamingState;
 use serde::Serialize;
 use std::path::PathBuf;
@@ -28,6 +29,7 @@ pub struct AppState {
     pub playback: Arc<PlaybackService>,
     pub scanner: Arc<MediaScanner>,
     pub auth: Arc<AuthService>,
+    pub profiles: Arc<ProfileService>,
 }
 
 impl AppState {
@@ -39,6 +41,7 @@ impl AppState {
     ) -> Self {
         let scanner = Arc::new(MediaScanner::new(library_root.clone()));
         let auth = Arc::new(AuthService::new(playback.db().clone()));
+        let profiles = Arc::new(ProfileService::new(playback.db().clone()));
         Self {
             library_root,
             catalog,
@@ -46,6 +49,7 @@ impl AppState {
             playback,
             scanner,
             auth,
+            profiles,
         }
     }
 }
@@ -172,6 +176,7 @@ pub async fn get_library_season_handler(
 /// Construit et configure le routeur Axum pour Norylum Server.
 pub fn create_router(state: AppState) -> Router {
     let auth = state.auth.clone();
+    let profiles = state.profiles.clone();
     let streaming_state = StreamingState {
         library_root: state.library_root.clone(),
         catalog: state.catalog.clone(),
@@ -220,6 +225,12 @@ pub fn create_router(state: AppState) -> Router {
         .nest("/v1/library", library_routes)
         .nest("/v1/media", streaming_routes)
         .nest("/v1/playback", playback_routes)
+        .route(
+            "/v1/profiles",
+            axum::routing::get(auth_routes::list_profiles_handler)
+                .post(auth_routes::create_profile_handler)
+                .with_state(profiles),
+        )
         .route("/v1/auth/me", axum::routing::get(auth_routes::me_handler))
         .route(
             "/v1/auth/logout",

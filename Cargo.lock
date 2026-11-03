@@ -554,6 +554,7 @@ dependencies = [
  "norylum-foundation",
  "norylum-library",
  "norylum-playback",
+ "norylum-profiles",
  "norylum-streaming",
  "serde",
  "serde_json",
@@ -700,8 +701,12 @@ dependencies = [
 name = "norylum-profiles"
 version = "0.1.0"
 dependencies = [
+ "norylum-auth",
  "norylum-foundation",
+ "norylum-persistence",
+ "rusqlite",
  "serde",
+ "tokio",
 ]
 
 [[package]]

@@ -115,3 +115,21 @@ pub(crate) async fn switch_profile_handler(
             .await?,
     ))
 }
+
+/// GET /v1/profiles
+pub(crate) async fn list_profiles_handler(
+    State(profiles): State<Arc<norylum_profiles::ProfileService>>,
+    Extension(ctx): Extension<RequestContext>,
+) -> Result<Json<Vec<norylum_profiles::ProfileRecord>>, NorylumError> {
+    Ok(Json(profiles.list(&ctx).await?))
+}
+
+/// POST /v1/profiles
+pub(crate) async fn create_profile_handler(
+    State(profiles): State<Arc<norylum_profiles::ProfileService>>,
+    Extension(ctx): Extension<RequestContext>,
+    Json(payload): Json<norylum_profiles::CreateProfilePayload>,
+) -> Result<(StatusCode, Json<norylum_profiles::ProfileRecord>), NorylumError> {
+    let profile = profiles.create(&ctx, payload).await?;
+    Ok((StatusCode::CREATED, Json(profile)))
+}
