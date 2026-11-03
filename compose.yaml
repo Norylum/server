@@ -37,6 +37,8 @@ services:
   gluetun:
     profiles:
       - torrent
+      - acquisition
+      - vpn-test
     image: qmcgaw/gluetun:v3.41.3
     cap_add:
       - NET_ADMIN
@@ -49,9 +51,10 @@ services:
       VPN_SERVICE_PROVIDER: ${NORYLUM_VPN_PROVIDER:-protonvpn}
       VPN_TYPE: ${NORYLUM_VPN_TYPE:-wireguard}
       SERVER_COUNTRIES: ${NORYLUM_VPN_COUNTRIES:-}
+      SERVER_REGIONS: ${NORYLUM_VPN_REGIONS:-}
       VPN_PORT_FORWARDING: "off"
     volumes:
-      - ./config/vpn:/run/secrets:ro
+      - ./vpn-secrets:/run/secrets:ro
 
   seeder:
     profiles:
@@ -65,7 +68,7 @@ services:
         condition: service_healthy
     user: "${NORYLUM_UID:?Run setup}:${NORYLUM_GID:?Run setup}"
     init: true
-    restart: unless-stopped
+    restart: "no"
     stop_grace_period: 30s
     security_opt:
       - no-new-privileges:true
@@ -79,6 +82,33 @@ services:
     volumes:
       - ./media:/data/media
 
+
+  vpn-probe:
+    profiles:
+      - vpn-test
+    image: norylum-server:local
+    network_mode: "service:gluetun"
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    user: "${NORYLUM_UID:?Run setup}:${NORYLUM_GID:?Run setup}"
+    restart: "no"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    command:
+      - curl
+      - --ipv4
+      - --noproxy
+      - "*"
+      - --fail
+      - --silent
+      - --show-error
+      - --max-time
+      - "15"
+      - https://api.ipify.org
 
   maintenance:
     profiles:

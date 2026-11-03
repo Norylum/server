@@ -1022,7 +1022,7 @@ Network security:
 - No torrent ports are published by default.
 - Only Gluetun receives NET_ADMIN.
 - Local cleanup runs with network_mode: none.
-- VPN credentials are read from config/vpn/.
+- VPN credentials are read from vpn-secrets/.
 - Missing credentials prevent vpn-start.
 - Norylum server remains accessible independently.
 
@@ -1038,7 +1038,7 @@ Local configuration keys in .env:
     NORYLUM_VPN_PROVIDER=protonvpn
     NORYLUM_VPN_TYPE=wireguard
 
-Secret file names in config/vpn/:
+Secret file names in vpn-secrets/:
 
     wireguard_private_key
     wireguard_addresses

@@ -45,3 +45,8 @@ rustc-ice-*.txt
 # Norylum Docker - configuration et secrets locaux
 /.env
 /config/
+
+/vpn-secrets/
+
+__pycache__/
+*.pyc

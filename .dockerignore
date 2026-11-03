@@ -11,3 +11,8 @@ target
 **/*.sqlite3*
 **/*.bak
 .DS_Store
+
+vpn-secrets
+
+__pycache__/
+*.pyc

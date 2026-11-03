@@ -20,6 +20,10 @@ Norylum Docker
   scripts/norylum-docker.sh status   Etat et URL locale
   scripts/norylum-docker.sh scan     Scan authentifie sans token manuel
   scripts/norylum-docker.sh jobs     Journal d'ingestion authentifie
+  scripts/norylum-docker.sh vpn-connect
+                                    Connecter Gluetun seul
+  scripts/norylum-docker.sh vpn-egress-check
+                                    Verifier la sortie Internet VPN
   scripts/norylum-docker.sh vpn-start
                                     Demarrer Gluetun puis seeder
   scripts/norylum-docker.sh vpn-status
@@ -286,72 +290,7 @@ print(json.load(sys.stdin)["access_token"])
 
 vpn_check_config() {
   require_config
-
-  local provider protocol
-
-  provider="$(sed -n 's/^NORYLUM_VPN_PROVIDER=//p' .env | tail -1)"
-  protocol="$(sed -n 's/^NORYLUM_VPN_TYPE=//p' .env | tail -1)"
-
-  protocol="${protocol:-wireguard}"
-
-  case "$provider" in
-    protonvpn|mullvad|airvpn|nordvpn|"private internet access") ;;
-    *)
-      echo "VPN non configure ou fournisseur non supporte" >&2
-      return 1
-      ;;
-  esac
-
-  case "$protocol" in
-    wireguard)
-      if [[ "$provider" == "private internet access" ]]; then
-        echo "PIA : utiliser OpenVPN pour cette premiere version" >&2
-        return 1
-      fi
-
-      if [[ ! -s config/vpn/wireguard_private_key ||
-            -L config/vpn/wireguard_private_key ]]; then
-        echo "Cle WireGuard absente ou non fiable" >&2
-        return 1
-      fi
-
-      if [[ "$provider" == mullvad || "$provider" == airvpn ]]; then
-        if [[ ! -s config/vpn/wireguard_addresses ||
-              -L config/vpn/wireguard_addresses ]]; then
-          echo "Adresses WireGuard absentes ou non fiables" >&2
-          return 1
-        fi
-      fi
-
-      if [[ "$provider" == airvpn ]]; then
-        if [[ ! -s config/vpn/wireguard_preshared_key ||
-              -L config/vpn/wireguard_preshared_key ]]; then
-          echo "Cle AirVPN preshared absente ou non fiable" >&2
-          return 1
-        fi
-      fi
-      ;;
-    openvpn)
-      if [[ "$provider" == mullvad ]]; then
-        echo "Mullvad : utiliser WireGuard" >&2
-        return 1
-      fi
-
-      if [[ ! -s config/vpn/openvpn_user ||
-            ! -s config/vpn/openvpn_password ||
-            -L config/vpn/openvpn_user ||
-            -L config/vpn/openvpn_password ]]; then
-        echo "Identifiants OpenVPN absents ou non fiables" >&2
-        return 1
-      fi
-      ;;
-    *)
-      echo "Protocole VPN non supporte" >&2
-      return 1
-      ;;
-  esac
-
-  echo "OK : configuration VPN presente"
+  python3 "$ROOT/scripts/vpn_config.py"
 }
 
 vpn_status() {
@@ -392,14 +331,67 @@ vpn_stop() {
   "${DC[@]}" --profile torrent stop seeder gluetun
 }
 
-vpn_start() {
-  # No old seeder may remain running while the VPN is checked.
-  "${DC[@]}" --profile torrent stop seeder >/dev/null 2>&1 || true
+vpn_connect() {
   vpn_check_config || return 1
+
+  # Refuse de recreer le tunnel sous un seeder actif.
+  if "${DC[@]}" --profile torrent ps \
+      --status running --services 2>/dev/null |
+      grep -qx seeder; then
+    echo "Arreter le seeder avant de reconfigurer Gluetun" >&2
+    return 1
+  fi
+
   "${DC[@]}" --profile torrent up -d gluetun || return 1
   vpn_wait_healthy || return 1
+}
 
-  # Preserve dependency and health checks.
+vpn_egress_check() {
+  if ! vpn_status >/dev/null; then
+    echo "VPN non healthy : test refuse" >&2
+    return 1
+  fi
+
+  local host_ip vpn_ip
+
+  host_ip="$(curl --ipv4 --noproxy '*' \
+    --fail --silent --show-error --max-time 15 \
+    https://api.ipify.org)" || return 1
+
+  vpn_ip="$("${DC[@]}" --profile torrent \
+    --profile vpn-test run --rm --no-deps vpn-probe)" ||
+    return 1
+
+  vpn_ip="${vpn_ip//$'\r'/}"
+  vpn_ip="${vpn_ip//$'\n'/}"
+
+  if [[ -z "$host_ip" || -z "$vpn_ip" ]]; then
+    echo "Test IP incomplet" >&2
+    return 1
+  fi
+
+  if [[ "$host_ip" == "$vpn_ip" ]]; then
+    echo "VERIFICATION NON CONCLUANTE : meme IP de sortie" >&2
+    return 1
+  fi
+
+  echo "OK : IP de sortie VPN distincte de celle de l'hote"
+  echo "Attention : le test du kill switch reste a effectuer"
+}
+
+vpn_start() {
+  # Arreter l'ancien seeder avant toute operation Gluetun.
+  "${DC[@]}" --profile torrent stop seeder \
+    >/dev/null 2>&1 || true
+
+  vpn_connect || return 1
+
+  # Bloquer le seeder si la sortie VPN n'est pas verifiee.
+  if ! vpn_egress_check; then
+    echo "ERREUR : verification VPN echouee, seeder bloque" >&2
+    return 1
+  fi
+
   "${DC[@]}" --profile torrent up -d seeder
 }
 
@@ -564,6 +556,8 @@ case "${1:-}" in
   status) "${DC[@]}" ps; echo "URL locale : http://127.0.0.1:$(sed -n 's/^NORYLUM_PORT=//p' .env | head -1)" ;;
   scan) scan ;;
   jobs) api_call /v1/library/ingest/jobs ;;
+  vpn-connect) vpn_connect ;;
+  vpn-egress-check) vpn_egress_check ;;
   vpn-start) vpn_start ;;
   vpn-status) vpn_status ;;
   vpn-stop) vpn_stop ;;
