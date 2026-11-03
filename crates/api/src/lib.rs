@@ -5,6 +5,8 @@
 mod auth_routes;
 mod device_routes;
 mod ingestion_routes;
+mod ingestion_worker;
+pub use ingestion_worker::run_ingestion_worker;
 mod metadata_routes;
 mod playback_sync_routes;
 
@@ -243,6 +245,10 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/ingest/ready",
             axum::routing::post(ingestion_routes::notify_file_ready_handler),
+        )
+        .route(
+            "/ingest/jobs",
+            axum::routing::get(ingestion_routes::list_jobs_handler),
         )
         .route("/media", axum::routing::get(list_library_media_handler))
         .route("/movies", axum::routing::get(list_library_movies_handler))

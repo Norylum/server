@@ -18,6 +18,21 @@ Elles ne constituent pas des publications de versions stables.
 
 ## [Unreleased]
 
+### Library Ingestion V2 + Docker (2026-11-03)
+
+- Worker d'ingestion automatique sur marqueurs `.ready` (polling configurable).
+- Indexation incrémentale SQLite sans rescan global ni purge de la bibliothèque.
+- Journal persistant `ingestion_jobs` : tentatives, erreurs, reprise partielle.
+- API principale `GET /v1/library/ingest/jobs`.
+- Image Docker multi-stage, Compose, volumes persistants, santé HTTP.
+- Configuration initiale unique du compte administrateur et du jeton TMDB.
+- Script d'installation, sauvegarde SQLite et mise à jour Docker en une commande.
+- Par défaut exposition du seul port local 127.0.0.1:8120.
+
+---
+
+
+
 ### Library Ingestion V1 — 2026-11-03
 
 - Protected `POST /v1/library/ingest/ready` for the principal profile.

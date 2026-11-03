@@ -3,6 +3,7 @@
 //! et la protection stricte contre le Directory Traversal.
 
 pub mod ingestion;
+mod scan_one;
 pub use ingestion::IngestionService;
 
 use norylum_foundation::{MediaId, NorylumError};

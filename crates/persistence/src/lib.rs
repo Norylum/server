@@ -13,6 +13,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+mod ingestion;
+pub use ingestion::IngestionJob;
+
 mod embedded_tags;
 pub use embedded_tags::EmbeddedMediaTags;
 
@@ -292,6 +295,9 @@ impl Database {
 
         conn.execute_batch(include_str!("metadata_migration.sql"))
             .map_err(|e| NorylumError::Internal(format!("Migration metadata SQLite : {e}")))?;
+
+        conn.execute_batch(include_str!("ingestion_migration.sql"))
+            .map_err(|e| NorylumError::Internal(format!("Migration ingestion V2 : {e}")))?;
 
         conn.execute_batch(include_str!("auth_migration.sql"))
             .map_err(|e| NorylumError::Internal(format!("Migration auth SQLite: {e}")))?;

@@ -1,0 +1,35 @@
+name: norylum
+services:
+  server:
+    image: norylum-server:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    user: "${NORYLUM_UID:?Run scripts/norylum-docker.sh setup}:${NORYLUM_GID:?Run scripts/norylum-docker.sh setup}"
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ports:
+      # Local only by default. Use an HTTPS reverse proxy for external access.
+      - "127.0.0.1:${NORYLUM_PORT:-8120}:8120"
+    environment:
+      NORYLUM_MEDIA_DIR: /data/media
+      NORYLUM_LISTEN_ADDR: 0.0.0.0:8120
+      NORYLUM_INGEST_POLL_SECONDS: ${NORYLUM_INGEST_POLL_SECONDS:-15}
+      NORYLUM_ADMIN_USERNAME: ${NORYLUM_ADMIN_USERNAME:-}
+      RUST_LOG: ${NORYLUM_RUST_LOG:-info,norylum=debug}
+    volumes:
+      # Same host directory used before Docker, including SQLite WAL and media.
+      - ./media:/data/media
+      # Tokens/password are not stored in the Compose environment.
+      - ./config:/run/norylum-config:ro
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8120/health"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+      start_period: 30s

@@ -72,10 +72,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // A database imported from native macOS stores absolute host file paths.
+    // Rebase them once on first container start without losing stable media IDs.
+    let existing = app_state.playback.db().list_all_media().await?;
+    if existing.is_empty()
+        || existing
+            .iter()
+            .any(|m| !m.file_path.starts_with(&app_state.library_root))
+    {
+        tracing::info!("Premier scan ou migration des chemins vers ce volume");
+        let scanned = app_state.scanner.scan().await?;
+        app_state.playback.db().sync_media_items(&scanned).await?;
+    }
+
+    // Surveillance periodique des marqueurs *.ready (apres transfert complet).
+    // La tache partage le verrou d'indexation avec les routes HTTP.
+    tokio::spawn(norylum_api::run_ingestion_worker(app_state.clone()));
+
     // Initialisation du routeur complet
     let app = create_router(app_state);
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 8120));
+    // Par defaut local; Docker definit explicitement 0.0.0.0:8120.
+    let addr: SocketAddr = std::env::var("NORYLUM_LISTEN_ADDR")
+        .unwrap_or_else(|_| "127.0.0.1:8120".to_owned())
+        .parse()?;
     tracing::info!("Serveur Norylum prêt et en écoute sur http://{}", addr);
 
     let listener = tokio::net::TcpListener::bind(&addr).await?;

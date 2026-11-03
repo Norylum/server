@@ -648,3 +648,84 @@ starts torrent sharing. TMDB association and file tagging remain separate.
 For cross-filesystem mounts, hard-link publication is unsupported. A shared
 file lock with external downloaders and the future torrent engine will be a
 separate version; do not ingest a file while another process is writing it.
+
+
+## Installation et mises a jour avec Docker (Norylum)
+
+Prerequis : Docker Desktop / Docker Engine avec Compose V2, Git.
+
+Sur une machine neuve, cloner ce depot puis lancer :
+
+```bash
+scripts/norylum-docker.sh setup
+scripts/norylum-docker.sh start
+```
+
+`setup` demande UNE SEULE FOIS le nom et mot de passe du premier administrateur,
+ainsi que le jeton TMDB optionnel. Il ecrit `.env` et les fichiers dans
+`config/` avec permissions restrictives ; ces fichiers sont ignores par Git.
+Le jeton est relu a chaque demarrage du conteneur. L'administrateur est
+cree uniquement si la base ne contient aucun compte. Une simple mise a jour
+ne recree donc ni son compte, ni ses profils, ni les sessions conservees dans
+SQLite. Ne pas supprimer `media/norylum.sqlite3` ni `config/`.
+
+Le repertoire local `media/` est monte dans le conteneur (`/data/media`) :
+films, series et SQLite persistent lors des reconstructions des images.
+Si la base existait deja avant Docker, saisir le **compte admin actuel** dans
+`setup` (et non un nouveau) : le bootstrap est idempotent et n'ecrase pas
+les identifiants existants. Au premier demarrage dans Docker, Norylum detecte
+les anciens chemins absolus macOS, effectue un scan de rebasage et conserve
+les media IDs par chemin relatif.
+
+```bash
+scripts/norylum-docker.sh status
+scripts/norylum-docker.sh logs
+scripts/norylum-docker.sh jobs
+scripts/norylum-docker.sh scan
+scripts/norylum-docker.sh update
+scripts/norylum-docker.sh stop
+```
+
+`update` effectue une sauvegarde transactionnelle SQLite via `.backup`,
+un `git pull --ff-only origin dev`, reconstruit l'image Docker et remplace
+le conteneur. L'application n'est pas exposee directement a Internet :
+`127.0.0.1:8120` est publie sur la machine hote. Pour un usage distant,
+configurer plus tard un reverse proxy HTTPS avec authentification et controle
+d'acces. **Ne jamais lancer l'ancien serveur natif et le conteneur Docker
+contre la meme base simultanement.** Les mises a jour restent **manuelles**,
+avec une commande unique.
+
+Le mot de passe initial reste dans `config/admin_password` pour les commandes
+locales `scan` et `jobs` ; le stocker de maniere sure, et proteger les acces a
+l'hote ainsi qu'aux sauvegardes. Les secrets ne sont pas ecrits dans
+`compose.yaml` ou l'image Docker.
+
+### Ingestion V2 automatique (marqueur explicite)
+
+Les nouvelles videos doivent etre copiees completement dans
+`media/.norylum-staging/` ; creer ensuite un fichier vide portant le nom
+`NOM_DE_VIDEO.mkv.ready`. Le serveur surveille ces marqueurs (par defaut
+toutes les 15 secondes), puis attend au moins 30 secondes sans modification,
+execute ffprobe, publie par lien dur et indexe le fichier de maniere
+**incrementale** sans purger les autres medias. Le marqueur est efface en cas
+de succes et l'operation est inscrite dans `ingestion_jobs` SQLite.
+La route HTTP `POST /v1/library/ingest/ready` reste disponible et partage
+le verrou d'indexation avec l'ingestion automatique et le scan manuel.
+
+Pour copier facilement un film present sur la machine hote :
+
+```bash
+scripts/norylum-docker.sh ingest "/chemin/Film (2026).mkv"
+```
+
+La copie se termine avant la creation du marqueur `.ready`. Ne jamais
+utiliser cette commande sur une video dont on ne dispose pas des droits
+necessaires. La recuperation apres crash est prise en charge pour la fenetre
+lien dur + indexation, mais une panne ou une corruption externe peut toujours
+necessiter une intervention. Les erreurs restent visibles via
+`/v1/library/ingest/jobs`. Une simple detection de taille stable ne prouve
+pas qu'un programme tiers a ferme le fichier : seul le producteur doit
+produire `.ready` a la fin du transfert.
+
+L'association TMDB et l'ecriture MKV/MP4 sont pour l'instant des operations
+separees. Aucun moteur torrent ni seeding automatique n'est active.

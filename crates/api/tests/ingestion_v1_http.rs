@@ -70,6 +70,7 @@ async fn ready_requires_auth_principal_and_valid_paths() {
     assert_eq!(forbidden.status(), StatusCode::FORBIDDEN);
 
     let invalid = app
+        .clone()
         .oneshot(
             Request::post(url)
                 .header("content-type", "application/json")
@@ -80,4 +81,38 @@ async fn ready_requires_auth_principal_and_valid_paths() {
         .await
         .unwrap();
     assert_eq!(invalid.status(), StatusCode::BAD_REQUEST);
+
+    let denied = app
+        .clone()
+        .oneshot(
+            Request::get("/v1/library/ingest/jobs")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+
+    let child_jobs = app
+        .clone()
+        .oneshot(
+            Request::get("/v1/library/ingest/jobs")
+                .header("authorization", format!("Bearer {}", child.access_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(child_jobs.status(), StatusCode::FORBIDDEN);
+
+    let principal_jobs = app
+        .oneshot(
+            Request::get("/v1/library/ingest/jobs")
+                .header("authorization", format!("Bearer {}", adult.access_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(principal_jobs.status(), StatusCode::OK);
 }

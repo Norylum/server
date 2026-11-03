@@ -1,0 +1,13 @@
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+config
+media
+target
+**/*.mkv
+**/*.mp4
+**/*.sqlite3*
+**/*.bak
+.DS_Store
