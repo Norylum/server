@@ -17,6 +17,7 @@ members = [
     "crates/playback",
     "crates/torrent",
     "crates/persistence",
+    "crates/acquisition-transport",
     "shared/api-types",
     "shared/test-support",
 ]
