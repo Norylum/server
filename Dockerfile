@@ -13,6 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /app/target/release/norylum-server /usr/local/bin/norylum-server
 COPY --from=builder /app/target/release/norylum-metadata-tags /usr/local/bin/norylum-metadata-tags
 COPY --from=builder /app/target/release/norylum-seeder /usr/local/bin/norylum-seeder
+COPY --from=builder /app/target/release/norylum-torrent-cleanup /usr/local/bin/norylum-torrent-cleanup
+COPY --from=builder /app/target/release/norylum-torrent-cleanup /usr/local/bin/norylum-torrent-cleanup
 COPY scripts/docker-entrypoint.sh /usr/local/bin/norylum-entrypoint
 RUN chmod 755 /usr/local/bin/norylum-entrypoint
 WORKDIR /data

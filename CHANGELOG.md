@@ -18,6 +18,26 @@ Elles ne constituent pas des publications de versions stables.
 
 ## [Unreleased]
 
+### Torrent V3 - Network and snapshot hardening
+
+**Added**
+- Default localhost-only TCP/UDP port publishing.
+- Live peer-count metrics from librqbit.
+- Guarded offline snapshot cleanup CLI.
+- Explicit user confirmation before deletion.
+- Concurrent activation protection via SQLite transaction.
+- Regression tests for original-media preservation
+  and refusal of unexpected snapshot contents.
+
+**Safety**
+- No automatic snapshot deletion.
+- No changes to accounts, TMDB or original media.
+- Seeding still requires explicit authorization.
+
+---
+
+
+
 ### Torrent V2 — Persistent multi-torrent management
 
 **Added**

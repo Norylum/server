@@ -65,6 +65,7 @@ fn digest(path: &Path) -> Result<[u8; 32], NorylumError> {
 
 pub struct SeedLock {
     _file: File,
+    root: PathBuf,
 }
 
 impl SeedLock {
@@ -83,7 +84,89 @@ impl SeedLock {
         file.try_lock_exclusive()
             .map_err(|_| conflict("Un seeder Norylum est deja actif"))?;
 
-        Ok(Self { _file: file })
+        Ok(Self {
+            _file: file,
+            root: base,
+        })
+    }
+}
+
+impl SeedLock {
+    /// Inspect a snapshot while holding the exclusive seeder lock.
+    /// Never follow symlinks or recursively delete directories.
+    fn checked_snapshot(
+        &self,
+        id: &MediaId,
+    ) -> Result<(PathBuf, PathBuf, Option<PathBuf>), NorylumError> {
+        check_id(id)?;
+
+        let parent = self.root.join(SNAPSHOTS);
+        let folder = parent.join(id.as_str());
+
+        let folder_meta = fs::symlink_metadata(&folder)?;
+        if !folder_meta.is_dir() || folder_meta.file_type().is_symlink() {
+            return Err(invalid("Dossier snapshot non fiable"));
+        }
+
+        let entries = fs::read_dir(&folder)?.collect::<Result<Vec<_>, _>>()?;
+
+        if entries.len() != 1 {
+            return Err(conflict(
+                "Snapshot inattendu : exactement un fichier requis",
+            ));
+        }
+
+        let file = entries[0].path();
+        let meta = fs::symlink_metadata(&file)?;
+
+        if !meta.is_file() || meta.file_type().is_symlink() {
+            return Err(invalid("Snapshot non regulier"));
+        }
+
+        let name = file
+            .file_name()
+            .and_then(|v| v.to_str())
+            .ok_or_else(|| invalid("Nom snapshot invalide"))?;
+
+        let ext = file
+            .extension()
+            .and_then(|v| v.to_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+
+        if name.starts_with('.') || !matches!(ext.as_str(), "mkv" | "mp4" | "m4v") {
+            return Err(invalid("Contenu snapshot inattendu"));
+        }
+
+        let torrent = parent.join(format!("{}.torrent", id.as_str()));
+
+        let torrent = match fs::symlink_metadata(&torrent) {
+            Ok(meta) if meta.is_file() && !meta.file_type().is_symlink() => Some(torrent),
+            Ok(_) => return Err(invalid("Fichier torrent non fiable")),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+            Err(e) => return Err(NorylumError::Io(e)),
+        };
+
+        Ok((folder, file, torrent))
+    }
+
+    pub fn inspect_snapshot(&self, id: &MediaId) -> Result<PathBuf, NorylumError> {
+        let (_, file, _) = self.checked_snapshot(id)?;
+        Ok(file)
+    }
+
+    /// Destructive; caller must check SQLite authorization first.
+    pub fn cleanup_snapshot(&self, id: &MediaId) -> Result<(), NorylumError> {
+        let (folder, file, torrent) = self.checked_snapshot(id)?;
+
+        fs::remove_file(file)?;
+        fs::remove_dir(folder)?;
+
+        if let Some(torrent) = torrent {
+            fs::remove_file(torrent)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -259,6 +342,68 @@ mod tests {
         drop(first);
 
         assert!(SeedLock::acquire(&root).is_ok());
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod cleanup_tests {
+    use super::*;
+
+    #[test]
+    fn cleanup_removes_only_the_isolated_copy() {
+        let root = std::env::temp_dir().join(format!("norylum-cleanup-{}", Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+
+        let original = root.join("Original.mkv");
+        fs::write(&original, b"original intact").unwrap();
+
+        let id = MediaId::new("med_aaaaaaaaaaaaaaaa");
+        let lock = SeedLock::acquire(&root).unwrap();
+
+        let folder = root.join(SNAPSHOTS).join(id.as_str());
+        fs::create_dir(&folder).unwrap();
+
+        let copy = folder.join("Original.mkv");
+        fs::write(&copy, b"snapshot").unwrap();
+
+        let metainfo = root
+            .join(SNAPSHOTS)
+            .join(format!("{}.torrent", id.as_str()));
+        fs::write(&metainfo, b"torrent-test").unwrap();
+
+        assert_eq!(
+            fs::canonicalize(lock.inspect_snapshot(&id).unwrap()).unwrap(),
+            fs::canonicalize(&copy).unwrap()
+        );
+        lock.cleanup_snapshot(&id).unwrap();
+
+        assert!(!folder.exists());
+        assert!(!metainfo.exists());
+        assert_eq!(fs::read(&original).unwrap(), b"original intact");
+
+        drop(lock);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn cleanup_refuses_unexpected_contents() {
+        let root = std::env::temp_dir().join(format!("norylum-cleanup-guard-{}", Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+
+        let id = MediaId::new("med_bbbbbbbbbbbbbbbb");
+        let lock = SeedLock::acquire(&root).unwrap();
+        let folder = root.join(SNAPSHOTS).join(id.as_str());
+
+        fs::create_dir(&folder).unwrap();
+        fs::write(folder.join("Video.mkv"), b"snapshot").unwrap();
+        fs::write(folder.join("unexpected.txt"), b"keep").unwrap();
+
+        assert!(lock.cleanup_snapshot(&id).is_err());
+        assert!(folder.join("Video.mkv").exists());
+        assert!(folder.join("unexpected.txt").exists());
+
+        drop(lock);
         fs::remove_dir_all(root).unwrap();
     }
 }

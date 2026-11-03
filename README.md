@@ -927,3 +927,57 @@ Les donnees historiques restent dans SQLite.
 Ne pas supprimer manuellement les snapshots pendant
 le seeding. Aucun nettoyage automatique des copies n'est
 effectue dans cette version.
+
+## Torrent V3 - Network hardening and guarded cleanup
+
+### Network
+
+The seeder's published TCP and UDP ports are bound to
+127.0.0.1 by default:
+
+    NORYLUM_TORRENT_BIND_IP=127.0.0.1
+
+An externally reachable address requires an explicit,
+separate network configuration decision.
+
+Loopback port publishing does not anonymize outgoing
+BitTorrent, DHT or peer communications.
+
+No BitTorrent session starts without an enabled share.
+
+### Peer metrics
+
+peer_count reports live connected peers when librqbit
+provides an active statistics snapshot. Otherwise null
+indicates that the measurement is unavailable.
+
+### Snapshot cleanup
+
+A snapshot can be deleted only through an explicit
+administrative operation:
+
+    scripts/norylum-docker.sh torrent-disable med_ID
+    scripts/norylum-docker.sh torrent-status
+    scripts/norylum-docker.sh torrent-cleanup med_ID
+
+Before deletion:
+- Every torrent must be disabled.
+- The target must have status disabled in SQLite.
+- The seeder must release the exclusive lock.
+- The snapshot folder must contain exactly one
+  regular MKV, MP4 or M4V file.
+- Symlinks, subdirectories and unknown contents
+  cause the operation to fail.
+- SQLite holds a write transaction during deletion.
+- The terminal requires the word SUPPRIMER.
+
+The operation removes the isolated snapshot and
+its corresponding metainfo file. It never removes
+the original library video.
+
+The process never deletes a snapshot automatically.
+Historic transfer counters remain in SQLite.
+
+Do not remove the media/.norylum-torrent-snapshots/.seeder.lock file manually.
+Do not use filesystem cleanup tools directly on an
+active or partially prepared torrent.

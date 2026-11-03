@@ -1,4 +1,4 @@
-//! Torrent V2: persistent opt-in multi-torrent coordinator.
+//! Torrent V3: multi-torrent coordinator with live peer metrics.
 //! A single librqbit session shares one global upload limit.
 
 use librqbit::{
@@ -223,9 +223,15 @@ async fn reconcile(
                 db.set_torrent_runtime_state(&id, true, "error", None, Some(error))
                     .await?;
             } else {
-                // Peer count is intentionally unknown until a verified
-                // peer-stats adapter is added. Never invent a count.
-                db.record_torrent_metrics(&id, delta, rate, None).await?;
+                // Count only peers in the live state.
+                // None means no live stats were available.
+                let connected_peers = stats
+                    .live
+                    .as_ref()
+                    .map(|live| live.snapshot.peer_stats.live);
+
+                db.record_torrent_metrics(&id, delta, rate, connected_peers)
+                    .await?;
             }
         }
     }

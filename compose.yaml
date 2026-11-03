@@ -57,5 +57,5 @@ services:
     volumes:
       - ./media:/data/media
     ports:
-      - "${NORYLUM_TORRENT_PORT:-6881}:6881/tcp"
-      - "${NORYLUM_TORRENT_PORT:-6881}:6881/udp"
+      - "${NORYLUM_TORRENT_BIND_IP:-127.0.0.1}:${NORYLUM_TORRENT_PORT:-6881}:6881/tcp"
+      - "${NORYLUM_TORRENT_BIND_IP:-127.0.0.1}:${NORYLUM_TORRENT_PORT:-6881}:6881/udp"

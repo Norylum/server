@@ -22,12 +22,14 @@ Norylum Docker
   scripts/norylum-docker.sh jobs     Journal d'ingestion authentifie
   scripts/norylum-docker.sh torrent-enable MEDIA_ID
                                     Activer explicitement un partage BitTorrent
-  scripts/norylum-docker.sh torrent-disable
+  scripts/norylum-docker.sh torrent-disable MEDIA_ID
                                     Arreter le partage
   scripts/norylum-docker.sh torrent-limit KIO_PAR_SEC
                                     Definir le debit global
   scripts/norylum-docker.sh torrent-status
                                     Afficher l'etat du seeder
+  scripts/norylum-docker.sh torrent-cleanup MEDIA_ID
+                                    Nettoyer un snapshot desactive
   scripts/norylum-docker.sh torrent-logs
                                     Afficher les journaux et le magnet
   scripts/norylum-docker.sh ingest FICHIER
@@ -336,6 +338,73 @@ torrent_status() {
   torrent_api GET /v1/torrent/shares
 }
 
+torrent_cleanup() {
+  require_config
+
+  local id="${1:-}"
+
+  if [[ ! "$id" =~ ^med_[[:xdigit:]]{16,32}$ ]]; then
+    echo "MediaId invalide" >&2
+    return 1
+  fi
+
+  command -v sqlite3 >/dev/null || {
+    echo "sqlite3 requis" >&2
+    return 1
+  }
+
+  local enabled
+  enabled="$(sqlite3 -readonly media/norylum.sqlite3 \
+    "SELECT COUNT(*) FROM torrent_shares WHERE enabled=1;")"
+
+  if [[ "$enabled" != "0" ]]; then
+    echo "Desactiver TOUS les torrents avant nettoyage" >&2
+    return 1
+  fi
+
+  local running=0
+  if "${DC[@]}" --profile torrent ps \
+      --status running --services 2>/dev/null |
+      grep -qx seeder; then
+    running=1
+    "${DC[@]}" --profile torrent stop seeder
+  fi
+
+  local result=0
+
+  echo "Verification du snapshot : $id"
+
+  if "${DC[@]}" --profile torrent run \
+      --rm --no-deps \
+      --entrypoint /usr/local/bin/norylum-torrent-cleanup \
+      seeder --media-id "$id"; then
+
+    printf "Supprimer uniquement ce snapshot (ecrire SUPPRIMER) : "
+    local answer
+    IFS= read -r answer
+
+    if [[ "$answer" == "SUPPRIMER" ]]; then
+      if ! "${DC[@]}" --profile torrent run \
+          --rm --no-deps \
+          --entrypoint /usr/local/bin/norylum-torrent-cleanup \
+          seeder --media-id "$id" --apply; then
+        result=1
+      fi
+    else
+      echo "Nettoyage annule."
+    fi
+  else
+    result=1
+  fi
+
+  if (( running == 1 )); then
+    "${DC[@]}" --profile torrent up -d --no-deps seeder ||
+      result=1
+  fi
+
+  return "$result"
+}
+
 torrent_logs() {
   "${DC[@]}" --profile torrent logs --tail=100 seeder
 }
@@ -372,6 +441,7 @@ case "${1:-}" in
   torrent-limit) torrent_limit "${2:-}" ;;
   torrent-disable) torrent_disable "${2:-}" ;;
   torrent-status) torrent_status ;;
+  torrent-cleanup) torrent_cleanup "${2:-}" ;;
   torrent-logs) torrent_logs ;;
   ingest) ingest "${2:-}" ;;
   *) usage; exit 2 ;;
