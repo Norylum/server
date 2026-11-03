@@ -157,3 +157,39 @@ GPL-3.0-or-later.
 **Norylum — IA-Propelled Project**
 
 *Designed with AI. Built with AI. Directed by humans.*
+
+## Authentification locale
+
+Norylum utilise Argon2id pour les mots de passe et des
+sessions Bearer opaques stockees sous forme de hash SHA-256
+dans SQLite.
+
+Au premier demarrage, configurer :
+
+- `NORYLUM_ADMIN_USERNAME`
+- `NORYLUM_ADMIN_PASSWORD` (12 caracteres minimum)
+
+Le bootstrap est unique et ne remplace pas un compte existant.
+
+### Routes
+
+- `POST /v1/auth/login` : connexion
+- `GET /v1/auth/me` : session courante
+- `POST /v1/auth/logout` : deconnexion
+- `POST /v1/auth/switch-profile` : changement de profil
+
+Toutes les routes de bibliotheque, streaming et progression
+necessitent un jeton Bearer valide.
+
+Les en-tetes d'identite fournis par les clients ne constituent
+pas une authentification. Le middleware les remplace par les
+valeurs provenant de SQLite.
+
+Les jetons expirent apres sept jours.
+
+### Limites de cette premiere version
+
+Ne pas exposer directement le serveur sur Internet.
+Avant tout deploiement public, ajouter HTTPS, limitation des
+tentatives de connexion, gestion complete des profils et
+durcissement de la configuration.

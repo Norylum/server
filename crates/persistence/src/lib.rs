@@ -251,6 +251,9 @@ impl Database {
             ))
         })?;
 
+        conn.execute_batch(include_str!("auth_migration.sql"))
+            .map_err(|e| NorylumError::Internal(format!("Migration auth SQLite: {e}")))?;
+
         tracing::info!(
             "Base SQLite Norylum initialisée avec succès (WAL activé, migrations appliquées)"
         );
@@ -258,6 +261,15 @@ impl Database {
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
         })
+    }
+
+    /// Acces interne controle a la connexion partagee.
+    pub async fn with_connection<T, F>(&self, operation: F) -> Result<T, NorylumError>
+    where
+        F: FnOnce(&mut rusqlite::Connection) -> Result<T, NorylumError>,
+    {
+        let mut conn = self.conn.lock().await;
+        operation(&mut conn)
     }
 
     /// Synchronise l'ensemble des médias scannés dans SQLite.

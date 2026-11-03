@@ -2,9 +2,13 @@
 //! Assemble les routes HTTP Axum, gère l'état partagé `AppState` et unifie
 //! le catalogue, la bibliothèque, les films, les séries/saisons/épisodes, le streaming et la progression.
 
+mod auth_routes;
+
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
+use axum::middleware;
 use axum::{Json, Router};
+use norylum_auth::AuthService;
 use norylum_authorization::Authorizer;
 use norylum_catalog::{CatalogService, SeasonDetails, ShowDetails, ShowRecord};
 use norylum_foundation::{NorylumError, ShowId};
@@ -23,6 +27,7 @@ pub struct AppState {
     pub authorizer: Arc<dyn Authorizer>,
     pub playback: Arc<PlaybackService>,
     pub scanner: Arc<MediaScanner>,
+    pub auth: Arc<AuthService>,
 }
 
 impl AppState {
@@ -33,12 +38,14 @@ impl AppState {
         playback: Arc<PlaybackService>,
     ) -> Self {
         let scanner = Arc::new(MediaScanner::new(library_root.clone()));
+        let auth = Arc::new(AuthService::new(playback.db().clone()));
         Self {
             library_root,
             catalog,
             authorizer,
             playback,
             scanner,
+            auth,
         }
     }
 }
@@ -164,6 +171,7 @@ pub async fn get_library_season_handler(
 
 /// Construit et configure le routeur Axum pour Norylum Server.
 pub fn create_router(state: AppState) -> Router {
+    let auth = state.auth.clone();
     let streaming_state = StreamingState {
         library_root: state.library_root.clone(),
         catalog: state.catalog.clone(),
@@ -208,11 +216,31 @@ pub fn create_router(state: AppState) -> Router {
         )
         .with_state(playback_state);
 
-    Router::new()
-        .route("/health", axum::routing::get(|| async { "OK" }))
+    let protected = Router::new()
         .nest("/v1/library", library_routes)
         .nest("/v1/media", streaming_routes)
         .nest("/v1/playback", playback_routes)
+        .route("/v1/auth/me", axum::routing::get(auth_routes::me_handler))
+        .route(
+            "/v1/auth/logout",
+            axum::routing::post(auth_routes::logout_handler).with_state(auth.clone()),
+        )
+        .route(
+            "/v1/auth/switch-profile",
+            axum::routing::post(auth_routes::switch_profile_handler).with_state(auth.clone()),
+        )
+        .layer(middleware::from_fn_with_state(
+            auth.clone(),
+            auth_routes::auth_middleware,
+        ));
+
+    Router::new()
+        .route("/health", axum::routing::get(|| async { "OK" }))
+        .route(
+            "/v1/auth/login",
+            axum::routing::post(auth_routes::login_handler).with_state(auth),
+        )
+        .merge(protected)
 }
 
 #[cfg(test)]

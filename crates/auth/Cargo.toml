@@ -6,5 +6,14 @@ license.workspace = true
 
 [dependencies]
 norylum-foundation = { path = "../foundation" }
+norylum-persistence = { path = "../persistence" }
+argon2 = "0.5"
+rand_core = { version = "0.6", features = ["getrandom"] }
+rusqlite.workspace = true
+sha2.workspace = true
+uuid.workspace = true
+chrono.workspace = true
 serde.workspace = true
 
+[dev-dependencies]
+tokio.workspace = true

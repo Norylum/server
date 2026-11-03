@@ -57,6 +57,31 @@ async fn test_full_vertical_slice() {
         playback.clone(),
     );
 
+    let auth = state.auth.clone();
+
+    assert!(auth
+        .bootstrap_admin("admin", "test-password-securise-2026")
+        .await
+        .unwrap());
+
+    let admin = auth
+        .login("admin", "test-password-securise-2026")
+        .await
+        .unwrap();
+
+    let adult_token = admin.access_token;
+
+    let child_id = auth
+        .create_profile(&admin.account_id, "Enfant", true, Some(10))
+        .await
+        .unwrap();
+
+    let child_token = auth
+        .switch_profile(&adult_token, &child_id)
+        .await
+        .unwrap()
+        .access_token;
+
     let app = create_router(state);
 
     // ---------------------------------------------------------
@@ -72,11 +97,42 @@ async fn test_full_vertical_slice() {
     let resp = app.clone().oneshot(unauth_scan_req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 
+    // Les en-tetes d'identite seuls ne suffisent pas.
+    let forged = Request::builder()
+        .uri("/v1/library/media")
+        .header("x-account-id", "acc_famille")
+        .header("x-profile-id", "prof_parent")
+        .body(Body::empty())
+        .unwrap();
+
+    assert_eq!(
+        app.clone().oneshot(forged).await.unwrap().status(),
+        StatusCode::UNAUTHORIZED
+    );
+
+    // Un profil enfant ne peut pas falsifier son statut.
+    let forged_child = Request::builder()
+        .uri("/v1/auth/me")
+        .header("authorization", format!("Bearer {}", child_token))
+        .header("x-is-child", "false")
+        .body(Body::empty())
+        .unwrap();
+
+    let response = app.clone().oneshot(forged_child).await.unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let data: serde_json::Value =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+
+    assert_eq!(data["is_child"], true);
+
     // Cas 2 : Authentifié -> Scan réussi et persisté dans SQLite
     let auth_scan_req = Request::builder()
         .method("POST")
         .uri("/v1/library/scan")
         .header("x-account-id", "acc_famille")
+        .header("authorization", format!("Bearer {}", adult_token))
         .header("x-profile-id", "prof_admin")
         .body(Body::empty())
         .unwrap();
@@ -96,6 +152,7 @@ async fn test_full_vertical_slice() {
         .method("GET")
         .uri("/v1/library/media")
         .header("x-account-id", "acc_famille")
+        .header("authorization", format!("Bearer {}", child_token))
         .header("x-profile-id", "prof_enfant")
         .header("x-is-child", "true")
         .body(Body::empty())
@@ -119,6 +176,7 @@ async fn test_full_vertical_slice() {
         .method("GET")
         .uri("/v1/library/media")
         .header("x-account-id", "acc_famille")
+        .header("authorization", format!("Bearer {}", adult_token))
         .header("x-profile-id", "prof_parent")
         .header("x-is-child", "false")
         .body(Body::empty())
@@ -144,6 +202,7 @@ async fn test_full_vertical_slice() {
         .method("GET")
         .uri("/v1/library/movies")
         .header("x-account-id", "acc_famille")
+        .header("authorization", format!("Bearer {}", child_token))
         .header("x-profile-id", "prof_enfant")
         .header("x-is-child", "true")
         .body(Body::empty())
@@ -164,6 +223,7 @@ async fn test_full_vertical_slice() {
         .method("GET")
         .uri("/v1/library/shows")
         .header("x-account-id", "acc_famille")
+        .header("authorization", format!("Bearer {}", child_token))
         .header("x-profile-id", "prof_enfant")
         .header("x-is-child", "true")
         .body(Body::empty())
@@ -184,6 +244,7 @@ async fn test_full_vertical_slice() {
         .method("GET")
         .uri(format!("/v1/library/shows/{}", show_id))
         .header("x-account-id", "acc_famille")
+        .header("authorization", format!("Bearer {}", child_token))
         .header("x-profile-id", "prof_enfant")
         .header("x-is-child", "true")
         .body(Body::empty())
@@ -201,6 +262,7 @@ async fn test_full_vertical_slice() {
         .method("GET")
         .uri(format!("/v1/library/shows/{}/seasons/1", show_id))
         .header("x-account-id", "acc_famille")
+        .header("authorization", format!("Bearer {}", child_token))
         .header("x-profile-id", "prof_enfant")
         .header("x-is-child", "true")
         .body(Body::empty())
@@ -223,6 +285,7 @@ async fn test_full_vertical_slice() {
         .method("GET")
         .uri(format!("/v1/media/{}", adult_media_id))
         .header("x-account-id", "acc_famille")
+        .header("authorization", format!("Bearer {}", child_token))
         .header("x-profile-id", "prof_enfant")
         .header("x-is-child", "true")
         .body(Body::empty())
@@ -236,6 +299,7 @@ async fn test_full_vertical_slice() {
         .method("GET")
         .uri(format!("/v1/media/{}", kids_media_id))
         .header("x-account-id", "acc_famille")
+        .header("authorization", format!("Bearer {}", child_token))
         .header("x-profile-id", "prof_enfant")
         .header("x-is-child", "true")
         .header(header::RANGE, "bytes=0-9")
@@ -259,6 +323,7 @@ async fn test_full_vertical_slice() {
         .method("GET")
         .uri(format!("/v1/media/{}", ep_media_id))
         .header("x-account-id", "acc_famille")
+        .header("authorization", format!("Bearer {}", child_token))
         .header("x-profile-id", "prof_enfant")
         .header("x-is-child", "true")
         .header(header::RANGE, "bytes=0-9")
@@ -281,6 +346,7 @@ async fn test_full_vertical_slice() {
         .method("POST")
         .uri("/v1/playback/progress")
         .header("x-account-id", "acc_famille")
+        .header("authorization", format!("Bearer {}", child_token))
         .header("x-profile-id", "prof_enfant")
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(
@@ -327,6 +393,7 @@ async fn test_full_vertical_slice() {
         .method("GET")
         .uri("/v1/library/shows")
         .header("x-account-id", "acc_famille")
+        .header("authorization", format!("Bearer {}", adult_token))
         .header("x-profile-id", "prof_parent")
         .header("x-is-child", "false")
         .body(Body::empty())
@@ -344,6 +411,7 @@ async fn test_full_vertical_slice() {
         .method("GET")
         .uri(format!("/v1/playback/{}", ep_media_id))
         .header("x-account-id", "acc_famille")
+        .header("authorization", format!("Bearer {}", child_token))
         .header("x-profile-id", "prof_enfant")
         .body(Body::empty())
         .unwrap();

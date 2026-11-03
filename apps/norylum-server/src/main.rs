@@ -48,6 +48,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Injection de l'état partagé (remplace les appels HTTP inter-services)
     let app_state = AppState::new(canonical_media_dir, catalog, authorizer, playback);
 
+    // Initialisation du premier compte uniquement.
+    match (
+        std::env::var("NORYLUM_ADMIN_USERNAME"),
+        std::env::var("NORYLUM_ADMIN_PASSWORD"),
+    ) {
+        (Ok(username), Ok(password)) => {
+            if app_state.auth.bootstrap_admin(&username, &password).await? {
+                tracing::info!("Premier administrateur Norylum cree");
+            } else {
+                tracing::info!("Compte existant : bootstrap ignore");
+            }
+        }
+        (Err(_), Err(_)) => {
+            tracing::warn!("Bootstrap admin non configure");
+        }
+        _ => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Configurer ensemble les deux variables admin",
+            )
+            .into());
+        }
+    }
+
     // Initialisation du routeur complet
     let app = create_router(app_state);
 
