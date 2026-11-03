@@ -3,8 +3,14 @@ FROM rust:1-bookworm AS builder
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config libssl-dev ca-certificates && rm -rf /var/lib/apt/lists/*
+# Resilient crates.io downloads and persistent BuildKit registry cache.
+ENV CARGO_HTTP_MULTIPLEXING=false \
+    CARGO_HTTP_TIMEOUT=120 \
+    CARGO_NET_RETRY=10
+
 COPY . .
-RUN cargo build --release --locked -p norylum-server --bins
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    cargo build --release --locked -p norylum-server --bins
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \

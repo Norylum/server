@@ -251,7 +251,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut tracked = HashMap::new();
     let mut retry_after = HashMap::new();
 
-    println!("Norylum Torrent V2 pret.");
+    println!("Norylum Torrent V3 pret.");
     println!("Aucun partage sans autorisation SQLite.");
 
     #[cfg(unix)]
