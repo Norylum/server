@@ -3,12 +3,14 @@
 
 use axum::{
     extract::{Path, State},
+    http::StatusCode,
+    response::{IntoResponse, Response},
     Extension, Json,
 };
 use norylum_authorization::{Authorizer, MediaAccessInfo};
 use norylum_catalog::CatalogService;
 use norylum_foundation::{MediaId, NorylumError, RequestContext};
-use norylum_persistence::PlaybackProgressRecord;
+use norylum_persistence::{PlaybackProgressRecord, SyncWriteOperation};
 use norylum_playback::{PlaybackService, UpdateProgressPayload};
 use serde::Deserialize;
 use std::sync::Arc;
@@ -26,6 +28,8 @@ pub(crate) struct SyncProgressPayload {
     duration_seconds: f64,
     #[serde(default)]
     expected_revision: Option<u64>,
+    #[serde(default)]
+    operation_id: Option<String>,
 }
 
 async fn authorize_media(
@@ -103,19 +107,52 @@ pub(crate) async fn continue_watching_handler(
     Ok(Json(entries))
 }
 
+/// GET /v1/playback/history
+///
+/// Historique recent : un etat par media, pas chaque
+/// evenement individuel de lecture.
+pub(crate) async fn history_handler(
+    State(state): State<PlaybackSyncState>,
+    Extension(ctx): Extension<RequestContext>,
+) -> Result<Json<Vec<PlaybackProgressRecord>>, NorylumError> {
+    let mut entries = visible_progress(&state, &ctx).await?;
+
+    entries.retain(|entry| entry.position_seconds > 0.0);
+    entries.truncate(100);
+
+    Ok(Json(entries))
+}
+
 /// PUT /v1/playback/sync/:media_id
+///
+/// operation_id facultatif pour les anciens clients.
+/// Lors d'un conflit, le client recoit l'etat actuel.
 pub(crate) async fn sync_progress_handler(
     State(state): State<PlaybackSyncState>,
     Extension(ctx): Extension<RequestContext>,
     Path(media_id): Path<MediaId>,
     Json(payload): Json<SyncProgressPayload>,
-) -> Result<Json<PlaybackProgressRecord>, NorylumError> {
+) -> Result<Response, NorylumError> {
     authorize_media(&state, &ctx, &media_id).await?;
 
-    let updated = state
-        .playback
-        .db()
-        .sync_playback_progress(
+    let db = state.playback.db();
+
+    let update = if let Some(id) = payload.operation_id.as_deref() {
+        db.sync_playback_progress_idempotent(
+            ctx.account_id(),
+            ctx.profile_id(),
+            &media_id,
+            SyncWriteOperation {
+                operation_id: id,
+                position_seconds: payload.position_seconds,
+                duration_seconds: payload.duration_seconds,
+                expected_revision: payload.expected_revision,
+            },
+        )
+        .await
+    } else {
+        // Compatibilite avec les clients Playback Sync V1.
+        db.sync_playback_progress(
             ctx.account_id(),
             ctx.profile_id(),
             &media_id,
@@ -123,9 +160,28 @@ pub(crate) async fn sync_progress_handler(
             payload.duration_seconds,
             payload.expected_revision,
         )
-        .await?;
+        .await
+    };
 
-    Ok(Json(updated))
+    match update {
+        Ok(progress) => Ok(Json(progress).into_response()),
+        Err(NorylumError::Conflict(message)) => {
+            let current = db
+                .get_playback_progress(ctx.account_id(), ctx.profile_id(), &media_id)
+                .await?;
+
+            Ok((
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({
+                    "code": "CONFLICT",
+                    "error": message,
+                    "current": current,
+                })),
+            )
+                .into_response())
+        }
+        Err(other) => Err(other),
+    }
 }
 
 /// Ancien endpoint, maintenu pour les clients existants.

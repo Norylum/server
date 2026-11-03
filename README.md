@@ -396,3 +396,52 @@ Les revisions sont migrees sans effacer les progressions
 existantes. La synchronisation concerne les appareils
 connectes au meme serveur Norylum, pas plusieurs serveurs
 independants.
+
+
+## Playback Sync V2 — Reprise resiliente
+
+Les clients peuvent transmettre un `operation_id` stable
+sur PUT /v1/playback/sync/:media_id.
+
+Exemple :
+
+```json
+{
+  "position_seconds": 300.0,
+  "duration_seconds": 1200.0,
+  "expected_revision": 1,
+  "operation_id": "operation-550e8400-e29b"
+}
+```
+
+Le client doit generer un identifiant aleatoire unique
+pour chaque nouvelle ecriture et le reutiliser en cas
+de repetition apres une perte de reponse HTTP.
+
+Une meme operation avec le meme contenu et le meme
+identifiant est rejouee sans augmenter la revision.
+Un identifiant reutilise avec un contenu different
+est refuse avec HTTP 400.
+
+Les accuses d'operations sont conserves pendant 7 jours.
+Au-dela, le rejeu n'est plus garanti ; une ancienne
+revision provoque normalement HTTP 409.
+
+La reponse rejouee est le resultat historique de
+l'operation. Elle peut etre plus ancienne que l'etat
+actuel du serveur : il faut synchroniser avant de
+reprendre la lecture.
+
+En cas de conflit HTTP 409, la reponse contient
+`current`, une progression du serveur. Le client
+peut la conserver, ou presenter a l'utilisateur
+un choix explicite avant une nouvelle mise a jour.
+
+GET /v1/playback/history retourne les 100 derniers
+medias consultes par le profil, tries selon updated_at.
+Il s'agit d'un historique recent avec un etat par
+media, et non d'un journal de chaque lecture.
+
+L'ancien POST /v1/playback/progress reste last-write-wins.
+Les clients compatibles V2 doivent utiliser
+l'ecriture avec operation_id et expected_revision.

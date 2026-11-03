@@ -14,6 +14,9 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 mod playback_sync;
+mod playback_sync_v2;
+
+pub use playback_sync_v2::SyncWriteOperation;
 
 /// Modèle de données pour la persistance de la progression de lecture.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -192,6 +195,9 @@ impl Database {
             )
             .map_err(|e| NorylumError::Internal(format!("Migration revision playback : {e}")))?;
         }
+
+        conn.execute_batch(include_str!("playback_sync_v2.sql"))
+            .map_err(|e| NorylumError::Internal(format!("Migration Playback Sync V2 : {e}")))?;
 
         // 2. Migration additive : ajout de la colonne media_type à media_items si absente
         let has_media_type = {

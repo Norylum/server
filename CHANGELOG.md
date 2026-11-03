@@ -18,6 +18,26 @@ Elles ne constituent pas des publications de versions stables.
 
 ## [Unreleased]
 
+### Playback Sync V2 — 2026-11-03
+
+**Added**
+- Rejeu idempotent des ecritures via operation_id.
+- Migration SQLite additive des operations synchronisees.
+- Accuse d'operation conserve pendant 7 jours.
+- Etat serveur actuel inclus dans les conflits HTTP 409.
+- GET /v1/playback/history, limite a 100 medias.
+- Tests de rejeu, conflits et reprise apres interruption.
+
+**Security**
+- Identifiants d'operation scopes par compte,
+  profil et media.
+- Aucun ecrasement par un rejeu ancien.
+- Historique filtre selon les permissions du profil.
+
+---
+
+
+
 ### Playback Sync V1 — 2026-11-03
 
 **Added**

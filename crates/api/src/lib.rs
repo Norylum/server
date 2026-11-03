@@ -236,6 +236,10 @@ pub fn create_router(state: AppState) -> Router {
             axum::routing::get(playback_sync_routes::continue_watching_handler),
         )
         .route(
+            "/history",
+            axum::routing::get(playback_sync_routes::history_handler),
+        )
+        .route(
             "/:media_id",
             axum::routing::get(playback_sync_routes::legacy_get_handler),
         )
