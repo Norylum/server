@@ -18,6 +18,17 @@ Elles ne constituent pas des publications de versions stables.
 
 ## [Unreleased]
 
+### Torrent V3 - Isolated lifecycle validation
+
+- Added an explicit, ignored E2E integration test.
+- Runs real seeder and cleanup executables.
+- Uses synthetic media and a temporary SQLite database.
+- Forces loopback networking without DHT or trackers.
+- Verifies cleanup refusal while the seeder is active.
+- Verifies original preservation and disabled restart.
+
+
+
 ### Torrent V3 - Network and snapshot hardening
 
 **Added**

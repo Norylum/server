@@ -981,3 +981,33 @@ Historic transfer counters remain in SQLite.
 Do not remove the media/.norylum-torrent-snapshots/.seeder.lock file manually.
 Do not use filesystem cleanup tools directly on an
 active or partially prepared torrent.
+
+## Torrent V3 - Isolated lifecycle integration test
+
+The test runs the real seeder and cleanup executables
+against a temporary SQLite database and synthetic media.
+
+Run explicitly:
+
+    cargo test -p norylum-server \
+      --test torrent_v3_lifecycle \
+      -- --ignored --nocapture
+
+Safety characteristics:
+- Debug builds only for the isolated seeder mode
+- Temporary directory with a required E2E marker
+- TCP listener bound to 127.0.0.1 on an ephemeral port
+- DHT disabled
+- Tracker communication disabled
+- Local service discovery disabled
+- No real media, credentials or production SQLite access
+- No externally distributed torrent
+
+The test covers idle startup, opt-in, torrent creation,
+cleanup refusal while active, disable, guarded deletion,
+original-file preservation and restart persistence.
+
+The test is ignored by default to prevent accidental
+process or network startup during ordinary CI runs.
+
+This is not a two-peer data transfer benchmark.

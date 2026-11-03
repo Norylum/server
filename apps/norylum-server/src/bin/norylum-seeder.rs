@@ -25,11 +25,49 @@ struct Tracked {
     last_sample: Instant,
 }
 
+// Test-only network isolation. Never available in release builds.
+fn isolated_e2e_mode(root: &Path) -> Result<bool, Box<dyn std::error::Error>> {
+    let requested = env::var("NORYLUM_TORRENT_E2E_LOCAL_ONLY").ok().as_deref() == Some("1");
+
+    if !requested {
+        return Ok(false);
+    }
+
+    if !cfg!(debug_assertions) {
+        return Err("Mode E2E interdit en release".into());
+    }
+
+    let temporary_root = fs::canonicalize(env::temp_dir())?;
+
+    if root == temporary_root || !root.starts_with(&temporary_root) {
+        return Err("Mode E2E reserve au dossier temporaire".into());
+    }
+
+    let marker = root.join(".norylum-torrent-e2e");
+    let metadata = fs::symlink_metadata(&marker)?;
+
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err("Marqueur E2E non fiable".into());
+    }
+
+    Ok(true)
+}
+
 async fn start_session(
     root: &Path,
     limit: u32,
 ) -> Result<Arc<Session>, Box<dyn std::error::Error>> {
+    let isolated = isolated_e2e_mode(root)?;
+
+    let dht = if isolated {
+        None
+    } else {
+        SessionOptions::default().dht
+    };
+
     let options = SessionOptions {
+        dht,
+        disable_trackers: isolated,
         ipv4_only: true,
         disable_local_service_discovery: true,
         peer_limit: Some(10),
@@ -39,7 +77,11 @@ async fn start_session(
             download_bps: None,
         },
         listen: Some(ListenerOptions {
-            listen_addr: SocketAddr::from(([0, 0, 0, 0], 6881)),
+            listen_addr: if isolated {
+                SocketAddr::from(([127, 0, 0, 1], 0))
+            } else {
+                SocketAddr::from(([0, 0, 0, 0], 6881))
+            },
             enable_upnp_port_forwarding: false,
             ipv4_only: true,
             ..Default::default()
