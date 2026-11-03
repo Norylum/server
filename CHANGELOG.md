@@ -18,6 +18,32 @@ Elles ne constituent pas des publications de versions stables.
 
 ## [Unreleased]
 
+### Torrent V2 — Persistent multi-torrent management
+
+**Added**
+- SQLite torrent_shares and torrent_settings.
+- Principal-only authenticated torrent control API.
+- Independent media enable/disable.
+- Shared global upload rate limit.
+- Multi-torrent librqbit coordinator.
+- Persistent transfer counters and runtime states.
+- Docker administration without manual API tokens.
+- SQLite, access-control and multi-share tests.
+
+**Changed**
+- Replaced single-media .env configuration.
+- Torrent network session starts only with enabled shares.
+- Existing V1 shares are not automatically reactivated.
+
+**Limitations**
+- Peer count adapter remains pending.
+- Live runtime state may be stale after a process crash.
+- Snapshot cleanup is intentionally manual.
+
+---
+
+
+
 ### Torrent V1 — Opt-in librqbit
 
 **Added**

@@ -844,3 +844,86 @@ personnelles deja presentes dans le fichier.
 Ne partager que des contenus dont la distribution
 est autorisee. Les telechargements BitTorrent
 ne sont pas implementes dans cette version.
+
+## Torrent V2 - Multi-torrent persistant
+
+Le controle du seeding est desormais stocke dans SQLite.
+
+Les anciennes variables NORYLUM_TORRENT_MEDIA_ID et
+NORYLUM_TORRENT_UPLOAD_KIBPS ne sont plus utilisees.
+
+La migration ne reactive aucun partage V1 automatiquement.
+Les anciennes copies torrent sont conservees sans modification.
+
+### Architecture
+
+- Un processus norylum-server : HTTP, auth, catalogue.
+- Un processus norylum-seeder : coordination BitTorrent.
+- Une seule session librqbit pour plusieurs medias.
+- Un plafond global d'envoi, partage entre tous les torrents.
+- Une liste SQLite d'autorisations par MediaId.
+- Un snapshot independant par media.
+
+Le service seeder Docker peut fonctionner en attente.
+Lorsque la liste des medias autorises est vide, il ne
+demarre aucune session BitTorrent et ne contacte aucun pair.
+
+### Administration
+
+    scripts/norylum-docker.sh torrent-status
+    scripts/norylum-docker.sh torrent-limit 64
+    scripts/norylum-docker.sh torrent-enable med_ID
+    scripts/norylum-docker.sh torrent-disable med_ID
+    scripts/norylum-docker.sh torrent-logs
+
+Aucun nouveau mot de passe ou jeton TMDB n'est necessaire.
+Les commandes se connectent avec l'administrateur existant.
+
+La commande torrent-enable exige la confirmation OUI,
+puis utilise l'API authentifiee du profil principal.
+
+### API
+
+    GET  /v1/torrent/shares
+    GET  /v1/torrent/settings
+    PUT  /v1/torrent/settings
+    POST /v1/torrent/media/:media_id/enable
+    POST /v1/torrent/media/:media_id/disable
+
+Pour activer un partage, le corps JSON doit contenir :
+
+    {"confirm_distribution_rights":true}
+
+L'API enregistre la demande, puis le seeder la prend en
+compte au cycle suivant (environ cinq secondes).
+
+Le status stopping indique une demande d'arret.
+Le status disabled indique que le seeder a traite l'arret.
+
+### Statistiques
+
+uploaded_bytes est un compteur cumule persistant.
+upload_bps est une estimation issue des relevés du seeder.
+peer_count reste null tant que l'adaptateur de pairs
+n'est pas implemente et verifie.
+
+En cas d'arret brutal du seeder, les derniers etats
+peuvent rester affiches jusqu'au redemarrage.
+Les donnees historiques restent dans SQLite.
+
+### Securite et limites
+
+- Aucun partage n'est active par defaut.
+- Les fichiers originaux ne sont pas utilises comme source
+  directe du moteur BitTorrent.
+- Les snapshots doivent etre conserves tant que les
+  torrents correspondants sont actifs.
+- Les limites de debit sont applicatives et ne couvrent
+  pas l'ensemble du trafic IP du systeme.
+- BitTorrent peut exposer l'adresse IP publique des pairs.
+- La verification des droits de distribution reste
+  la responsabilite de l'utilisateur.
+
+Ne pas supprimer manuellement les snapshots pendant
+le seeding. Aucun nettoyage automatique des copies n'est
+effectue dans cette version.

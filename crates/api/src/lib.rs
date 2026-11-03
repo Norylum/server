@@ -9,6 +9,7 @@ mod ingestion_worker;
 pub use ingestion_worker::run_ingestion_worker;
 mod metadata_routes;
 mod playback_sync_routes;
+mod torrent_routes;
 
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
@@ -240,6 +241,23 @@ pub fn create_router(state: AppState) -> Router {
         )
         .with_state(metadata_state);
 
+    let torrent_routes = Router::new()
+        .route("/shares", axum::routing::get(torrent_routes::list_handler))
+        .route(
+            "/settings",
+            axum::routing::get(torrent_routes::get_settings_handler)
+                .put(torrent_routes::set_settings_handler),
+        )
+        .route(
+            "/media/:media_id/enable",
+            axum::routing::post(torrent_routes::enable_handler),
+        )
+        .route(
+            "/media/:media_id/disable",
+            axum::routing::post(torrent_routes::disable_handler),
+        )
+        .with_state(state.clone());
+
     let library_routes = Router::new()
         .route("/scan", axum::routing::post(scan_library_handler))
         .route(
@@ -299,6 +317,7 @@ pub fn create_router(state: AppState) -> Router {
 
     let protected = Router::new()
         .nest("/v1/library", library_routes)
+        .nest("/v1/torrent", torrent_routes)
         .nest("/v1/media", streaming_routes)
         .nest("/v1/playback", playback_routes)
         .nest("/v1/metadata", metadata_routes)

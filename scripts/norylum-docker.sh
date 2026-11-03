@@ -20,10 +20,12 @@ Norylum Docker
   scripts/norylum-docker.sh status   Etat et URL locale
   scripts/norylum-docker.sh scan     Scan authentifie sans token manuel
   scripts/norylum-docker.sh jobs     Journal d'ingestion authentifie
-  scripts/norylum-docker.sh torrent-enable MEDIA_ID [KIO_PAR_SEC]
+  scripts/norylum-docker.sh torrent-enable MEDIA_ID
                                     Activer explicitement un partage BitTorrent
   scripts/norylum-docker.sh torrent-disable
                                     Arreter le partage
+  scripts/norylum-docker.sh torrent-limit KIO_PAR_SEC
+                                    Definir le debit global
   scripts/norylum-docker.sh torrent-status
                                     Afficher l'etat du seeder
   scripts/norylum-docker.sh torrent-logs
@@ -232,100 +234,106 @@ ingest() {
 }
 
 
-torrent_enable() {
+# Reuse stored local admin credentials; never print tokens.
+torrent_api() {
   require_config
 
-  local media_id="${1:-}"
-  local limit="${2:-64}"
+  local method="$1"
+  local endpoint="$2"
+  local data="${3:-}"
+  local port username payload response token
 
-  if [[ ! "$media_id" =~ ^med_[[:xdigit:]]{16,32}$ ]]; then
-    echo "MediaId Norylum invalide" >&2
+  port="$(sed -n 's/^NORYLUM_PORT=//p' .env | head -1)"
+  port="${port:-8120}"
+
+  username="$(sed -n 's/^NORYLUM_ADMIN_USERNAME=//p' .env | head -1)"
+
+  payload="$(python3 -c '
+import json,sys
+print(json.dumps({
+  "username":sys.argv[1],
+  "password":sys.stdin.read()
+}))
+' "$username" < config/admin_password)"
+
+  response="$(printf '%s' "$payload" |
+    curl --fail --silent --show-error       --max-time 15       -H "Content-Type: application/json"       --data-binary @-       "http://127.0.0.1:${port}/v1/auth/login")"
+
+  token="$(printf '%s' "$response" |
+    python3 -c '
+import json,sys
+print(json.load(sys.stdin)["access_token"])
+')"
+
+  if [[ -n "$data" ]]; then
+    curl --fail --silent --show-error       --max-time 30       -X "$method"       -H "Authorization: Bearer $token"       -H "Content-Type: application/json"       --data "$data"       "http://127.0.0.1:${port}${endpoint}"
+  else
+    curl --fail --silent --show-error       --max-time 30       -X "$method"       -H "Authorization: Bearer $token"       "http://127.0.0.1:${port}${endpoint}"
+  fi
+
+  printf '\n'
+}
+
+torrent_enable() {
+  local id="${1:-}"
+
+  if [[ ! "$id" =~ ^med_[[:xdigit:]]{16,32}$ ]]; then
+    echo "MediaId invalide : med_... requis" >&2
     return 1
   fi
 
-  if [[ ! "$limit" =~ ^[0-9]+$ ]] ||
-     (( 10#$limit < 8 || 10#$limit > 512 )); then
+  echo "Media : $id"
+  echo "BitTorrent peut exposer ton adresse IP publique."
+  echo "Le partage exige les droits de distribution du media."
+  printf "Confirmer explicitement (ecrire OUI) : "
+
+  local answer
+  IFS= read -r answer
+
+  if [[ "$answer" != "OUI" ]]; then
+    echo "Activation annulee"
+    return 0
+  fi
+
+  torrent_api POST     "/v1/torrent/media/$id/enable"     '{"confirm_distribution_rights":true}'
+
+  # Launches the coordinator; it reads the SQLite queue.
+  "${DC[@]}" --profile torrent up     -d --no-deps seeder
+}
+
+torrent_disable() {
+  local id="${1:-}"
+
+  if [[ ! "$id" =~ ^med_[[:xdigit:]]{16,32}$ ]]; then
+    echo "Indiquer le MediaId a desactiver" >&2
+    return 1
+  fi
+
+  torrent_api POST     "/v1/torrent/media/$id/disable"
+}
+
+torrent_limit() {
+  local limit="${1:-}"
+
+  if [[ ! "$limit" =~ ^[0-9]{1,3}$ ]]; then
+    echo "Limite numerique requise : 8 a 512" >&2
+    return 1
+  fi
+
+  local number=$((10#$limit))
+  if (( number < 8 || number > 512 )); then
     echo "Limite autorisee : 8 a 512 Kio/s" >&2
     return 1
   fi
 
-  command -v sqlite3 >/dev/null || {
-    echo "sqlite3 requis pour verifier le MediaId" >&2
-    return 1
-  }
+  local payload
+  printf -v payload '{"upload_kibps":%d}' "$number"
 
-  local count
-  count="$(sqlite3 -readonly media/norylum.sqlite3     "SELECT COUNT(*) FROM media_items WHERE id='$media_id';")"
-
-  if [[ "$count" != "1" ]]; then
-    echo "Media non indexe : $media_id" >&2
-    return 1
-  fi
-
-  echo "Activation demandee pour : $media_id"
-  echo "Limite d'envoi : $limit Kio/s"
-  echo "BitTorrent peut exposer ton adresse IP publique."
-  echo "Une copie du media sera conservee pour le partage."
-  printf 'Confirmer le partage autorise (ecrire OUI) : '
-
-  local answer
-  IFS= read -r answer
-  if [[ "$answer" != "OUI" ]]; then
-    echo "Activation annulee."
-    return 0
-  fi
-
-  python3 - "$media_id" "$limit" <<'PYCONFIG'
-from pathlib import Path
-import sys
-
-path = Path(".env")
-data = [
-    line for line in path.read_text().splitlines()
-    if not line.startswith((
-        "NORYLUM_TORRENT_MEDIA_ID=",
-        "NORYLUM_TORRENT_UPLOAD_KIBPS=",
-    ))
-]
-
-data.extend([
-    "NORYLUM_TORRENT_MEDIA_ID=" + sys.argv[1],
-    "NORYLUM_TORRENT_UPLOAD_KIBPS=" + sys.argv[2],
-])
-
-path.write_text("\n".join(data) + "\n")
-path.chmod(0o600)
-PYCONFIG
-
-  "${DC[@]}" --profile torrent up -d --no-deps --force-recreate seeder
-  "${DC[@]}" --profile torrent ps
-
-  echo "Verifier : scripts/norylum-docker.sh torrent-logs"
-}
-
-torrent_disable() {
-  require_config
-  "${DC[@]}" --profile torrent stop seeder || true
-
-  python3 <<'PYCONFIG'
-from pathlib import Path
-
-path = Path(".env")
-data = [
-    line for line in path.read_text().splitlines()
-    if not line.startswith("NORYLUM_TORRENT_MEDIA_ID=")
-]
-data.append("NORYLUM_TORRENT_MEDIA_ID=")
-path.write_text("\n".join(data) + "\n")
-path.chmod(0o600)
-PYCONFIG
-
-  echo "Partage desactive."
-  echo "Les snapshots existants ne sont pas supprimes."
+  torrent_api PUT /v1/torrent/settings "$payload"
 }
 
 torrent_status() {
-  "${DC[@]}" --profile torrent ps seeder
+  torrent_api GET /v1/torrent/shares
 }
 
 torrent_logs() {
@@ -337,9 +345,8 @@ case "${1:-}" in
   start)
     if [[ ! -f .env ]]; then echo 'Executer setup avant start' >&2; exit 1; fi
     "${DC[@]}" up -d --build server
-    if grep -q '^NORYLUM_TORRENT_MEDIA_ID=med_' .env; then
-      "${DC[@]}" --profile torrent up -d seeder
-    fi
+    # Idle coordinator does not start librqbit until SQLite authorizes a seed.
+    "${DC[@]}" --profile torrent up -d --no-deps seeder
     "${DC[@]}" --profile torrent ps
     ;;
   stop) "${DC[@]}" --profile torrent down ;;
@@ -351,9 +358,7 @@ case "${1:-}" in
     "${DC[@]}" build --pull
     "${DC[@]}" up -d --no-deps --force-recreate server
     wait_healthy
-    if grep -q '^NORYLUM_TORRENT_MEDIA_ID=med_' .env; then
-      "${DC[@]}" --profile torrent up -d --no-deps --force-recreate seeder
-    fi
+    "${DC[@]}" --profile torrent up       -d --no-deps --force-recreate seeder
     "${DC[@]}" --profile torrent ps
     ;;
   backup) require_config; backup_db ;;
@@ -363,8 +368,9 @@ case "${1:-}" in
   status) "${DC[@]}" ps; echo "URL locale : http://127.0.0.1:$(sed -n 's/^NORYLUM_PORT=//p' .env | head -1)" ;;
   scan) scan ;;
   jobs) api_call /v1/library/ingest/jobs ;;
-  torrent-enable) torrent_enable "${2:-}" "${3:-64}" ;;
-  torrent-disable) torrent_disable ;;
+  torrent-enable) torrent_enable "${2:-}" ;;
+  torrent-limit) torrent_limit "${2:-}" ;;
+  torrent-disable) torrent_disable "${2:-}" ;;
   torrent-status) torrent_status ;;
   torrent-logs) torrent_logs ;;
   ingest) ingest "${2:-}" ;;

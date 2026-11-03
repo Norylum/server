@@ -53,8 +53,6 @@ services:
       - norylum-seeder
     environment:
       NORYLUM_MEDIA_DIR: /data/media
-      NORYLUM_TORRENT_MEDIA_ID: ${NORYLUM_TORRENT_MEDIA_ID:-}
-      NORYLUM_TORRENT_UPLOAD_KIBPS: ${NORYLUM_TORRENT_UPLOAD_KIBPS:-64}
       RUST_LOG: ${NORYLUM_RUST_LOG:-info}
     volumes:
       - ./media:/data/media
