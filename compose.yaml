@@ -33,3 +33,31 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+
+  seeder:
+    profiles:
+      - torrent
+    image: norylum-server:local
+    depends_on:
+      server:
+        condition: service_healthy
+    user: "${NORYLUM_UID:?Run setup}:${NORYLUM_GID:?Run setup}"
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    command:
+      - norylum-seeder
+    environment:
+      NORYLUM_MEDIA_DIR: /data/media
+      NORYLUM_TORRENT_MEDIA_ID: ${NORYLUM_TORRENT_MEDIA_ID:-}
+      NORYLUM_TORRENT_UPLOAD_KIBPS: ${NORYLUM_TORRENT_UPLOAD_KIBPS:-64}
+      RUST_LOG: ${NORYLUM_RUST_LOG:-info}
+    volumes:
+      - ./media:/data/media
+    ports:
+      - "${NORYLUM_TORRENT_PORT:-6881}:6881/tcp"
+      - "${NORYLUM_TORRENT_PORT:-6881}:6881/udp"

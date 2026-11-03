@@ -15,6 +15,7 @@ members = [
     "crates/metadata",
     "crates/streaming",
     "crates/playback",
+    "crates/torrent",
     "crates/persistence",
     "shared/api-types",
     "shared/test-support",

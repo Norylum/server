@@ -20,6 +20,14 @@ Norylum Docker
   scripts/norylum-docker.sh status   Etat et URL locale
   scripts/norylum-docker.sh scan     Scan authentifie sans token manuel
   scripts/norylum-docker.sh jobs     Journal d'ingestion authentifie
+  scripts/norylum-docker.sh torrent-enable MEDIA_ID [KIO_PAR_SEC]
+                                    Activer explicitement un partage BitTorrent
+  scripts/norylum-docker.sh torrent-disable
+                                    Arreter le partage
+  scripts/norylum-docker.sh torrent-status
+                                    Afficher l'etat du seeder
+  scripts/norylum-docker.sh torrent-logs
+                                    Afficher les journaux et le magnet
   scripts/norylum-docker.sh ingest FICHIER
                                     Copier un fichier dans le staging et signaler .ready
 USAGE
@@ -223,14 +231,118 @@ ingest() {
   echo "Suivre: scripts/norylum-docker.sh jobs"
 }
 
+
+torrent_enable() {
+  require_config
+
+  local media_id="${1:-}"
+  local limit="${2:-64}"
+
+  if [[ ! "$media_id" =~ ^med_[[:xdigit:]]{16,32}$ ]]; then
+    echo "MediaId Norylum invalide" >&2
+    return 1
+  fi
+
+  if [[ ! "$limit" =~ ^[0-9]+$ ]] ||
+     (( 10#$limit < 8 || 10#$limit > 512 )); then
+    echo "Limite autorisee : 8 a 512 Kio/s" >&2
+    return 1
+  fi
+
+  command -v sqlite3 >/dev/null || {
+    echo "sqlite3 requis pour verifier le MediaId" >&2
+    return 1
+  }
+
+  local count
+  count="$(sqlite3 -readonly media/norylum.sqlite3     "SELECT COUNT(*) FROM media_items WHERE id='$media_id';")"
+
+  if [[ "$count" != "1" ]]; then
+    echo "Media non indexe : $media_id" >&2
+    return 1
+  fi
+
+  echo "Activation demandee pour : $media_id"
+  echo "Limite d'envoi : $limit Kio/s"
+  echo "BitTorrent peut exposer ton adresse IP publique."
+  echo "Une copie du media sera conservee pour le partage."
+  printf 'Confirmer le partage autorise (ecrire OUI) : '
+
+  local answer
+  IFS= read -r answer
+  if [[ "$answer" != "OUI" ]]; then
+    echo "Activation annulee."
+    return 0
+  fi
+
+  python3 - "$media_id" "$limit" <<'PYCONFIG'
+from pathlib import Path
+import sys
+
+path = Path(".env")
+data = [
+    line for line in path.read_text().splitlines()
+    if not line.startswith((
+        "NORYLUM_TORRENT_MEDIA_ID=",
+        "NORYLUM_TORRENT_UPLOAD_KIBPS=",
+    ))
+]
+
+data.extend([
+    "NORYLUM_TORRENT_MEDIA_ID=" + sys.argv[1],
+    "NORYLUM_TORRENT_UPLOAD_KIBPS=" + sys.argv[2],
+])
+
+path.write_text("\n".join(data) + "\n")
+path.chmod(0o600)
+PYCONFIG
+
+  "${DC[@]}" --profile torrent up -d --no-deps --force-recreate seeder
+  "${DC[@]}" --profile torrent ps
+
+  echo "Verifier : scripts/norylum-docker.sh torrent-logs"
+}
+
+torrent_disable() {
+  require_config
+  "${DC[@]}" --profile torrent stop seeder || true
+
+  python3 <<'PYCONFIG'
+from pathlib import Path
+
+path = Path(".env")
+data = [
+    line for line in path.read_text().splitlines()
+    if not line.startswith("NORYLUM_TORRENT_MEDIA_ID=")
+]
+data.append("NORYLUM_TORRENT_MEDIA_ID=")
+path.write_text("\n".join(data) + "\n")
+path.chmod(0o600)
+PYCONFIG
+
+  echo "Partage desactive."
+  echo "Les snapshots existants ne sont pas supprimes."
+}
+
+torrent_status() {
+  "${DC[@]}" --profile torrent ps seeder
+}
+
+torrent_logs() {
+  "${DC[@]}" --profile torrent logs --tail=100 seeder
+}
+
 case "${1:-}" in
   setup) setup ;;
   start)
     if [[ ! -f .env ]]; then echo 'Executer setup avant start' >&2; exit 1; fi
-    "${DC[@]}" up -d --build
-    "${DC[@]}" ps
+    "${DC[@]}" up -d --build server
+    if grep -q '^NORYLUM_TORRENT_MEDIA_ID=med_' .env; then
+      "${DC[@]}" --profile torrent up -d seeder
+    fi
+    "${DC[@]}" --profile torrent ps
     ;;
-  stop) "${DC[@]}" down ;;
+  stop) "${DC[@]}" --profile torrent down ;;
   update)
     require_config
     require_clean_dev
@@ -239,7 +351,10 @@ case "${1:-}" in
     "${DC[@]}" build --pull
     "${DC[@]}" up -d --no-deps --force-recreate server
     wait_healthy
-    "${DC[@]}" ps
+    if grep -q '^NORYLUM_TORRENT_MEDIA_ID=med_' .env; then
+      "${DC[@]}" --profile torrent up -d --no-deps --force-recreate seeder
+    fi
+    "${DC[@]}" --profile torrent ps
     ;;
   backup) require_config; backup_db ;;
   doctor) scripts/norylum-doctor.sh ;;
@@ -248,6 +363,10 @@ case "${1:-}" in
   status) "${DC[@]}" ps; echo "URL locale : http://127.0.0.1:$(sed -n 's/^NORYLUM_PORT=//p' .env | head -1)" ;;
   scan) scan ;;
   jobs) api_call /v1/library/ingest/jobs ;;
+  torrent-enable) torrent_enable "${2:-}" "${3:-64}" ;;
+  torrent-disable) torrent_disable ;;
+  torrent-status) torrent_status ;;
+  torrent-logs) torrent_logs ;;
   ingest) ingest "${2:-}" ;;
   *) usage; exit 2 ;;
 esac

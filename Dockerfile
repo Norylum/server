@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/norylum-server /usr/local/bin/norylum-server
 COPY --from=builder /app/target/release/norylum-metadata-tags /usr/local/bin/norylum-metadata-tags
+COPY --from=builder /app/target/release/norylum-seeder /usr/local/bin/norylum-seeder
 COPY scripts/docker-entrypoint.sh /usr/local/bin/norylum-entrypoint
 RUN chmod 755 /usr/local/bin/norylum-entrypoint
 WORKDIR /data

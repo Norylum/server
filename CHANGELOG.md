@@ -18,6 +18,34 @@ Elles ne constituent pas des publications de versions stables.
 
 ## [Unreleased]
 
+### Torrent V1 — Opt-in librqbit
+
+**Added**
+- Module norylum-torrent avec snapshots verifies SHA-256.
+- Seeder Rust avec librqbit.
+- Service Docker Compose facultatif.
+- Commandes torrent-enable, torrent-disable,
+  torrent-status et torrent-logs.
+- Plafond d'envoi configurable, 64 Kio/s par defaut.
+- Tests des snapshots, du verrou exclusif
+  et de l'exclusion des copies du catalogue.
+
+**Security**
+- Aucun partage par defaut.
+- Confirmation explicite avant activation.
+- Video originale jamais utilisee comme stockage torrent.
+- Refus des chemins non fiables et des snapshots differents.
+- Un seul media partage a la fois dans V1.
+
+**Known limitations**
+- L'adresse IP publique peut etre exposee par BitTorrent.
+- Les snapshots occupent de l'espace disque.
+- Pas encore de telechargement ni de gestion multi-torrent.
+
+---
+
+
+
 ### Docker hardening - process lock and maintenance checks
 
 - Exclusive OS-level volume lock shared by the server and offline metadata writer.

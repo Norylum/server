@@ -291,7 +291,10 @@ impl MediaScanner {
                 if path.is_dir() {
                     // Never expose a partially transferred staging file.
                     if current_dir == canonical_root
-                        && path.file_name() == Some(std::ffi::OsStr::new(".norylum-staging"))
+                        && path
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .is_some_and(|name| name.starts_with(".norylum-"))
                     {
                         continue;
                     }
@@ -472,6 +475,30 @@ mod ingestion_scanner_tests {
         let items = MediaScanner::new(&root).scan().await.unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].relative_path, "visible.mkv");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod torrent_snapshot_scanner_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn scanner_ignores_torrent_snapshots() {
+        let root =
+            std::env::temp_dir().join(format!("norylum-hidden-seed-{}", uuid::Uuid::new_v4()));
+
+        let snapshot = root.join(".norylum-torrent-snapshots/med_test");
+
+        std::fs::create_dir_all(&snapshot).unwrap();
+
+        std::fs::write(snapshot.join("Secret (2026).mkv"), b"dummy test only").unwrap();
+
+        let scanner = MediaScanner::new(&root);
+        let items = scanner.scan().await.unwrap();
+
+        assert!(items.is_empty());
+
         std::fs::remove_dir_all(root).unwrap();
     }
 }

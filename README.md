@@ -767,3 +767,80 @@ Do not run the native server and Docker server on the same media volume.
 For a new system, provide matching existing admin credentials during setup
 if importing a populated SQLite database; Norylum never resets the existing
 admin password when starting a container.
+
+## Torrent V1 — Partage volontaire avec librqbit
+
+Norylum dispose d'un moteur BitTorrent separe,
+desactive par defaut via un profil Docker Compose.
+
+Le partage est limite a un media a la fois dans V1.
+
+Le processus de seeding :
+- exige un MediaId present dans SQLite ;
+- exige une association TMDB existante ;
+- refuse les fichiers instables ou trop recents ;
+- refuse les liens symboliques ;
+- cree un snapshot physique du fichier ;
+- verifie le contenu avec SHA-256 ;
+- cree le torrent a partir du snapshot ;
+- n'ecrit jamais dans la video originale.
+
+Les copies se trouvent dans :
+
+    media/.norylum-torrent-snapshots/
+
+Elles ne sont pas indexees dans la bibliotheque.
+
+Le snapshot occupe approximativement la taille
+du fichier original. Il est conserve apres l'arret
+du seeding ; aucune suppression automatique.
+
+### Activer
+
+Choisir uniquement un fichier dont la distribution
+par BitTorrent est autorisee.
+
+    scripts/norylum-docker.sh torrent-enable med_ID 64
+
+La commande exige une confirmation explicite.
+
+Le nombre 64 est le plafond d'envoi applicatif
+en Kio/s. Valeurs acceptees : 8 a 512.
+
+Le conteneur seeder ecoute sur le port TCP/UDP 6881.
+Le profil Docker torrent n'est demarre que si
+un partage a ete volontairement active.
+
+### Etat et arret
+
+    scripts/norylum-docker.sh torrent-status
+    scripts/norylum-docker.sh torrent-logs
+    scripts/norylum-docker.sh torrent-disable
+
+La desactivation stoppe le conteneur et efface
+l'option active dans le fichier .env local.
+
+Le fichier .torrent est ecrit dans le repertoire
+de snapshots. Le lien magnet figure dans les logs.
+
+### Limites et confidentialite
+
+BitTorrent peut reveler l'adresse IP publique
+aux pairs et aux services de decouverte.
+La mention generique Norylum Server dans la video
+ne protege pas l'adresse IP des communications.
+
+Le moteur utilise DHT, sans ajout automatique de
+tracker et sans UPnP. Le port doit etre ouvert
+pour certaines connexions entrantes.
+
+Le plafond d'envoi porte sur le trafic gere
+par librqbit et non necessairement sur tous
+les octets transmis par la machine.
+
+Norylum ne supprime pas les metadonnees
+personnelles deja presentes dans le fichier.
+
+Ne partager que des contenus dont la distribution
+est autorisee. Les telechargements BitTorrent
+ne sont pas implementes dans cette version.
