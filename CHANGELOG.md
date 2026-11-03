@@ -18,6 +18,15 @@ Elles ne constituent pas des publications de versions stables.
 
 ## [Unreleased]
 
+### Acquisition V3.1 - Worker reservation engine
+
+- Added atomic acquisition claims with 90-second leases.
+- Added token fencing against stale workers.
+- Added crash recovery with a three-attempt limit.
+- Added an offline-only acquisition worker smoke test.
+- No network downloader or automatic media availability enabled.
+
+
 ### Acquisition V2 - Request lifecycle controls
 
 - Added principal-only approval and cancellation endpoints.

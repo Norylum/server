@@ -1111,3 +1111,19 @@ Approved requests remain pending in SQLite.
 No source search or download starts automatically.
 VPN and leak protection remain mandatory
 before enabling acquisition network workers.
+
+## Acquisition V3.1 - Offline worker foundation
+
+The worker queue uses SQLite immediate transactions.
+Only approved requests can be claimed.
+
+A claim changes the request status to searching.
+Leases expire after 90 seconds; up to three attempts are
+allowed. Stale worker tokens cannot renew or finish a claim.
+
+The worker currently supports only --offline-smoke.
+It operates against in-memory SQLite and has no network client.
+No download, seeding, or automatic ingestion is activated.
+
+Do not activate real acquisition until Gluetun leak tests
+and authorized-source validation have succeeded.

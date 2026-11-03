@@ -16,6 +16,9 @@ use tokio::sync::Mutex;
 mod acquisition;
 pub use acquisition::AcquisitionRequest;
 
+mod acquisition_worker;
+pub use acquisition_worker::AcquisitionLease;
+
 mod torrent;
 pub use torrent::{TorrentSettings, TorrentShare};
 
@@ -304,6 +307,9 @@ impl Database {
 
         conn.execute_batch(include_str!("acquisition_migration.sql"))
             .map_err(|e| NorylumError::Internal(format!("Migration Acquisition V1 : {e}")))?;
+
+        conn.execute_batch(include_str!("acquisition_worker_migration.sql"))
+            .map_err(|e| NorylumError::Internal(format!("Migration Acquisition Worker : {e}")))?;
 
         conn.execute_batch(include_str!("torrent_migration.sql"))
             .map_err(|e| NorylumError::Internal(format!("Migration Torrent V2 : {e}")))?;
