@@ -220,3 +220,11 @@ Exemple de creation de profil enfant :
 Cette premiere version ne comprend pas encore les codes PIN
 de profil, la modification ou la suppression des profils.
 Ne pas exposer le serveur publiquement.
+
+## 📝 Historique des changements
+
+Le développement de Norylum est documenté dans le
+[CHANGELOG.md](CHANGELOG.md).
+
+Chaque étape importante y est enregistrée avec sa date,
+ses fonctionnalités et les commits correspondants.
