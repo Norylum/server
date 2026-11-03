@@ -103,7 +103,10 @@ fn prepare_with_age(
 ) -> Result<PathBuf, NorylumError> {
     check_id(id)?;
 
-    let root = fs::canonicalize(root)?;
+    // macOS peut exposer /var comme alias de /private/var.
+    // Conserver la racine fournie pour reconnaitre les deux formes.
+    let input_root = root;
+    let root = fs::canonicalize(input_root)?;
 
     if !requested.is_absolute() {
         return Err(invalid("Chemin source non absolu"));
@@ -111,6 +114,7 @@ fn prepare_with_age(
 
     let relative = requested
         .strip_prefix(&root)
+        .or_else(|_| requested.strip_prefix(input_root))
         .map_err(|_| invalid("Source hors bibliotheque"))?;
 
     if !relative.components().all(|c| match c {
