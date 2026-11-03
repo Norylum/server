@@ -269,3 +269,41 @@ de profil depuis sa propre session.
 Le PIN est une protection d'usage familial et ne remplace
 pas une authentification forte ou une exposition HTTPS
 securisee. L'API reste destinee au developpement local.
+
+
+## Devices V1 — Appareils et sessions
+
+Un appareil est une instance de connexion creee par le serveur.
+Ce n'est pas une empreinte materielle certifiee.
+
+Lors de `POST /v1/auth/login`, le client peut envoyer :
+
+```json
+{
+  "username": "mon-compte",
+  "password": "mon-mot-de-passe",
+  "device_name": "Mac"
+}
+```
+
+La reponse inclut `device_id` et `session_id`.
+Le changement de profil conserve le meme `device_id`
+mais genere un nouveau `session_id`.
+
+Routes accessibles au profil principal :
+
+- `GET /v1/devices` : appareils du compte.
+- `GET /v1/devices/sessions` : sessions non expirees.
+- `DELETE /v1/devices/:device_id` : revoquer un appareil.
+- `DELETE /v1/devices/sessions/:session_id` : revoquer une session.
+
+Les reponses n'exposent jamais les jetons Bearer ou leurs hashes.
+Une revocation est prise en compte a la requete suivante.
+
+La migration SQLite conserve les sessions historiques et
+leur attribue des identifiants serveur. Les appareils sans
+session active restent visibles dans l'historique.
+
+Une nouvelle connexion avec le bon mot de passe cree une
+nouvelle entree appareil : la revocation ne constitue pas
+une interdiction permanente de reconnexion.

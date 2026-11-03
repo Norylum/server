@@ -551,6 +551,7 @@ dependencies = [
  "norylum-auth",
  "norylum-authorization",
  "norylum-catalog",
+ "norylum-devices",
  "norylum-foundation",
  "norylum-library",
  "norylum-playback",
@@ -616,8 +617,14 @@ dependencies = [
 name = "norylum-devices"
 version = "0.1.0"
 dependencies = [
+ "chrono",
+ "norylum-auth",
  "norylum-foundation",
+ "norylum-persistence",
+ "rusqlite",
  "serde",
+ "sha2",
+ "tokio",
 ]
 
 [[package]]

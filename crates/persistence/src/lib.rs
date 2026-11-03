@@ -282,6 +282,60 @@ impl Database {
             }
         }
 
+        // Devices V1 : migration additive des sessions existantes.
+        conn.execute_batch(include_str!("devices_migration.sql"))
+            .map_err(|e| NorylumError::Internal(format!("Migration devices SQLite : {e}")))?;
+
+        let session_columns: Vec<String> = {
+            let mut statement = conn
+                .prepare("PRAGMA table_info(auth_sessions)")
+                .map_err(|e| NorylumError::Internal(e.to_string()))?;
+
+            let rows = statement
+                .query_map([], |row| row.get::<_, String>(1))
+                .map_err(|e| NorylumError::Internal(e.to_string()))?;
+
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(|e| NorylumError::Internal(e.to_string()))?
+        };
+
+        for (name, definition) in [("device_id", "TEXT"), ("session_id", "TEXT")] {
+            if !session_columns.iter().any(|c| c == name) {
+                conn.execute_batch(&format!(
+                    "ALTER TABLE auth_sessions ADD COLUMN {name} {definition}"
+                ))
+                .map_err(|e| NorylumError::Internal(format!("Migration session {name} : {e}")))?;
+            }
+        }
+
+        conn.execute_batch(
+            "UPDATE auth_sessions
+             SET device_id = 'dev_' || lower(hex(randomblob(16)))
+             WHERE device_id IS NULL;
+
+             INSERT OR IGNORE INTO devices
+                 (id, account_id, name, created_at, last_seen_at)
+             SELECT s.device_id, s.account_id,
+                    'Session historique',
+                    CAST(strftime('%s', 'now') AS INTEGER),
+                    CAST(strftime('%s', 'now') AS INTEGER)
+             FROM auth_sessions s
+             WHERE s.device_id IS NOT NULL;
+
+             UPDATE auth_sessions
+             SET session_id = 'ses_' || lower(hex(randomblob(16)))
+             WHERE session_id IS NULL;
+
+             CREATE UNIQUE INDEX IF NOT EXISTS
+                 idx_auth_sessions_public_id
+             ON auth_sessions(session_id);
+
+             CREATE INDEX IF NOT EXISTS
+                 idx_auth_sessions_device
+             ON auth_sessions(device_id);",
+        )
+        .map_err(|e| NorylumError::Internal(format!("Migration sessions devices : {e}")))?;
+
         tracing::info!(
             "Base SQLite Norylum initialisée avec succès (WAL activé, migrations appliquées)"
         );

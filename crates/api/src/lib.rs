@@ -3,6 +3,7 @@
 //! le catalogue, la bibliothèque, les films, les séries/saisons/épisodes, le streaming et la progression.
 
 mod auth_routes;
+mod device_routes;
 
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
@@ -11,6 +12,7 @@ use axum::{Json, Router};
 use norylum_auth::AuthService;
 use norylum_authorization::Authorizer;
 use norylum_catalog::{CatalogService, SeasonDetails, ShowDetails, ShowRecord};
+use norylum_devices::DeviceService;
 use norylum_foundation::{NorylumError, ShowId};
 use norylum_library::{MediaItem, MediaScanner};
 use norylum_playback::{PlaybackService, PlaybackState};
@@ -29,6 +31,7 @@ pub struct AppState {
     pub playback: Arc<PlaybackService>,
     pub scanner: Arc<MediaScanner>,
     pub auth: Arc<AuthService>,
+    pub devices: Arc<DeviceService>,
     pub profiles: Arc<ProfileService>,
 }
 
@@ -41,6 +44,7 @@ impl AppState {
     ) -> Self {
         let scanner = Arc::new(MediaScanner::new(library_root.clone()));
         let auth = Arc::new(AuthService::new(playback.db().clone()));
+        let devices = Arc::new(DeviceService::new(playback.db().clone()));
         let profiles = Arc::new(ProfileService::new(playback.db().clone()));
         Self {
             library_root,
@@ -49,6 +53,7 @@ impl AppState {
             playback,
             scanner,
             auth,
+            devices,
             profiles,
         }
     }
@@ -176,6 +181,7 @@ pub async fn get_library_season_handler(
 /// Construit et configure le routeur Axum pour Norylum Server.
 pub fn create_router(state: AppState) -> Router {
     let auth = state.auth.clone();
+    let devices = state.devices.clone();
     let profiles = state.profiles.clone();
     let streaming_state = StreamingState {
         library_root: state.library_root.clone(),
@@ -242,6 +248,23 @@ pub fn create_router(state: AppState) -> Router {
             axum::routing::put(auth_routes::set_profile_pin_handler)
                 .delete(auth_routes::delete_profile_pin_handler)
                 .with_state(auth.clone()),
+        )
+        .route(
+            "/v1/devices",
+            axum::routing::get(device_routes::list_devices_handler).with_state(devices.clone()),
+        )
+        .route(
+            "/v1/devices/sessions",
+            axum::routing::get(device_routes::list_sessions_handler).with_state(devices.clone()),
+        )
+        .route(
+            "/v1/devices/sessions/:session_id",
+            axum::routing::delete(device_routes::revoke_session_handler)
+                .with_state(devices.clone()),
+        )
+        .route(
+            "/v1/devices/:device_id",
+            axum::routing::delete(device_routes::revoke_device_handler).with_state(devices),
         )
         .route("/v1/auth/me", axum::routing::get(auth_routes::me_handler))
         .route(

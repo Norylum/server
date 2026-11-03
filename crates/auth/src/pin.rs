@@ -211,33 +211,37 @@ impl AuthService {
         let incoming_hash = digest(token);
         let new_token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
         let new_hash = digest(&new_token);
+        let session_id = format!("ses_{}", Uuid::new_v4().simple());
 
         let now = Utc::now().timestamp();
         let expires_at = now + SESSION_LIFETIME;
 
-        let account_id = self
+        let (account_id, device_id) = self
             .db
             .with_connection(|conn| {
                 let tx = conn
                     .transaction_with_behavior(TransactionBehavior::Immediate)
                     .map_err(storage)?;
 
-                let source: Option<(String, i64)> = tx
+                let source: Option<(String, i64, String)> = tx
                     .query_row(
-                        "SELECT s.account_id, p.is_child
+                        "SELECT s.account_id, p.is_child, s.device_id
                          FROM auth_sessions s
+                         JOIN devices d
+                           ON d.id = s.device_id
+                          AND d.account_id = s.account_id
                          JOIN profiles p
                            ON p.id = s.profile_id
                           AND p.account_id = s.account_id
                          WHERE s.token_hash = ?1
                            AND s.expires_at > ?2",
                         params![incoming_hash, now],
-                        |row| Ok((row.get(0)?, row.get(1)?)),
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                     )
                     .optional()
                     .map_err(storage)?;
 
-                let (account, source_child) = source.ok_or_else(rejected)?;
+                let (account, source_child, device_id) = source.ok_or_else(rejected)?;
 
                 if source_child != 0 {
                     return Err(NorylumError::Forbidden(
@@ -346,14 +350,30 @@ impl AuthService {
                 // Creation atomique apres verification des droits.
                 tx.execute(
                     "INSERT INTO auth_sessions
-                     (token_hash, account_id, profile_id, expires_at)
-                     VALUES (?1, ?2, ?3, ?4)",
-                    params![new_hash, account, profile_id.as_str(), expires_at,],
+                     (token_hash, account_id, profile_id,
+                      expires_at, device_id, session_id)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    params![
+                        new_hash,
+                        account,
+                        profile_id.as_str(),
+                        expires_at,
+                        device_id,
+                        session_id,
+                    ],
+                )
+                .map_err(storage)?;
+
+                tx.execute(
+                    "UPDATE devices
+                     SET last_seen_at = ?3
+                     WHERE id = ?1 AND account_id = ?2",
+                    params![device_id, account, now],
                 )
                 .map_err(storage)?;
 
                 tx.commit().map_err(storage)?;
-                Ok(AccountId::new(account))
+                Ok((AccountId::new(account), DeviceId::new(device_id)))
             })
             .await?;
 
@@ -363,6 +383,8 @@ impl AuthService {
             expires_in: SESSION_LIFETIME as u64,
             account_id,
             profile_id: profile_id.clone(),
+            device_id,
+            session_id,
         })
     }
 }

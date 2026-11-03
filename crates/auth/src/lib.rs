@@ -35,6 +35,8 @@ pub struct LoginResponse {
     pub expires_in: u64,
     pub account_id: AccountId,
     pub profile_id: ProfileId,
+    pub device_id: DeviceId,
+    pub session_id: String,
 }
 
 #[derive(Clone)]
@@ -118,6 +120,23 @@ impl AuthService {
         username: &str,
         password: &str,
     ) -> Result<LoginResponse, NorylumError> {
+        self.login_with_device(username, password, None).await
+    }
+
+    pub async fn login_with_device(
+        &self,
+        username: &str,
+        password: &str,
+        device_name: Option<&str>,
+    ) -> Result<LoginResponse, NorylumError> {
+        let name = device_name.unwrap_or("Client Norylum").trim();
+
+        if name.is_empty() || name.len() > 64 || name.chars().any(char::is_control) {
+            return Err(NorylumError::Validation(
+                "Nom d'appareil invalide (1-64 octets)".into(),
+            ));
+        }
+
         let account: Option<(String, String)> = self
             .db
             .with_connection(|conn| {
@@ -134,13 +153,11 @@ impl AuthService {
 
         let (id, encoded) = account.ok_or_else(rejected)?;
 
-        {
-            let parsed = PasswordHash::new(&encoded).map_err(|_| rejected())?;
+        let parsed = PasswordHash::new(&encoded).map_err(|_| rejected())?;
 
-            Argon2::default()
-                .verify_password(password.as_bytes(), &parsed)
-                .map_err(|_| rejected())?;
-        }
+        Argon2::default()
+            .verify_password(password.as_bytes(), &parsed)
+            .map_err(|_| rejected())?;
 
         let account_id = AccountId::new(id);
 
@@ -149,8 +166,8 @@ impl AuthService {
             .with_connection(|conn| {
                 conn.query_row(
                     "SELECT id FROM profiles
-                 WHERE account_id = ?1
-                 ORDER BY rowid ASC LIMIT 1",
+                     WHERE account_id = ?1
+                     ORDER BY rowid ASC LIMIT 1",
                     params![account_id.as_str()],
                     |row| row.get(0),
                 )
@@ -158,7 +175,7 @@ impl AuthService {
             })
             .await?;
 
-        self.issue_session(&account_id, &ProfileId::new(profile_id))
+        self.issue_session(&account_id, &ProfileId::new(profile_id), name)
             .await
     }
 
@@ -166,26 +183,48 @@ impl AuthService {
         &self,
         account_id: &AccountId,
         profile_id: &ProfileId,
+        device_name: &str,
     ) -> Result<LoginResponse, NorylumError> {
         let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
 
         let token_hash = digest(&token);
-        let expires_at = Utc::now().timestamp() + SESSION_LIFETIME;
+        let device_id = DeviceId::random();
+        let session_id = format!("ses_{}", Uuid::new_v4().simple());
+
+        let now = Utc::now().timestamp();
+        let expires_at = now + SESSION_LIFETIME;
 
         self.db
             .with_connection(|conn| {
-                conn.execute(
+                let tx = conn
+                    .transaction_with_behavior(TransactionBehavior::Immediate)
+                    .map_err(storage)?;
+
+                tx.execute(
+                    "INSERT INTO devices
+                 (id, account_id, name, created_at, last_seen_at)
+                 VALUES (?1, ?2, ?3, ?4, ?4)",
+                    params![device_id.as_str(), account_id.as_str(), device_name, now,],
+                )
+                .map_err(storage)?;
+
+                tx.execute(
                     "INSERT INTO auth_sessions
-                 (token_hash, account_id, profile_id, expires_at)
-                 VALUES (?1, ?2, ?3, ?4)",
+                 (token_hash, account_id, profile_id,
+                  expires_at, device_id, session_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                     params![
                         token_hash,
                         account_id.as_str(),
                         profile_id.as_str(),
-                        expires_at
+                        expires_at,
+                        device_id.as_str(),
+                        session_id,
                     ],
                 )
                 .map_err(storage)?;
+
+                tx.commit().map_err(storage)?;
                 Ok(())
             })
             .await?;
@@ -196,6 +235,8 @@ impl AuthService {
             expires_in: SESSION_LIFETIME as u64,
             account_id: account_id.clone(),
             profile_id: profile_id.clone(),
+            device_id,
+            session_id,
         })
     }
 
@@ -207,33 +248,62 @@ impl AuthService {
         let token_hash = digest(token);
         let now = Utc::now().timestamp();
 
-        let session: Option<(String, String, i64, Option<i64>)> = self
+        let session: Option<(String, String, String, i64, Option<i64>)> = self
             .db
             .with_connection(|conn| {
-                conn.query_row(
-                    "SELECT s.account_id, s.profile_id,
-                            p.is_child, p.age_rating_max
+                let record = conn
+                    .query_row(
+                        "SELECT s.account_id, s.profile_id,
+                            s.device_id, p.is_child,
+                            p.age_rating_max
                      FROM auth_sessions s
                      JOIN profiles p
                        ON p.id = s.profile_id
                       AND p.account_id = s.account_id
+                     JOIN devices d
+                       ON d.id = s.device_id
+                      AND d.account_id = s.account_id
                      WHERE s.token_hash = ?1
                        AND s.expires_at > ?2",
-                    params![token_hash, now],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-                )
-                .optional()
-                .map_err(storage)
+                        params![token_hash, now],
+                        |row| {
+                            Ok((
+                                row.get(0)?,
+                                row.get(1)?,
+                                row.get(2)?,
+                                row.get(3)?,
+                                row.get(4)?,
+                            ))
+                        },
+                    )
+                    .optional()
+                    .map_err(storage)?;
+
+                if let Some((account, _, device, _, _)) = &record {
+                    // Pas d'ecriture SQLite a chaque requete :
+                    // actualisation au maximum une fois/minute.
+                    conn.execute(
+                        "UPDATE devices
+                         SET last_seen_at = ?2
+                         WHERE id = ?1
+                           AND account_id = ?3
+                           AND last_seen_at < ?2 - 60",
+                        params![device, now, account],
+                    )
+                    .map_err(storage)?;
+                }
+
+                Ok(record)
             })
             .await?;
 
-        let (account, profile, is_child, age_max) = session.ok_or_else(rejected)?;
+        let (account, profile, device, child, age_max) = session.ok_or_else(rejected)?;
 
         Ok(RequestContext::authenticated(
             AccountId::new(account),
             ProfileId::new(profile),
-            DeviceId::new("dev_authenticated"),
-            is_child != 0,
+            DeviceId::new(device),
+            child != 0,
             age_max.and_then(|v| u32::try_from(v).ok()),
         ))
     }

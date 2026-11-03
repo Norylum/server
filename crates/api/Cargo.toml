@@ -8,6 +8,7 @@ license.workspace = true
 norylum-foundation = { path = "../foundation" }
 norylum-auth = { path = "../auth" }
 norylum-profiles = { path = "../profiles" }
+norylum-devices = { path = "../devices" }
 norylum-authorization = { path = "../authorization" }
 norylum-library = { path = "../library" }
 norylum-catalog = { path = "../catalog" }

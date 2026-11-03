@@ -16,6 +16,8 @@ use std::sync::Arc;
 pub(crate) struct LoginPayload {
     username: String,
     password: String,
+    #[serde(default)]
+    device_name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -27,7 +29,7 @@ pub(crate) struct SwitchProfilePayload {
     profile_pin: Option<String>,
 }
 
-fn bearer(headers: &HeaderMap) -> Result<&str, NorylumError> {
+pub(crate) fn bearer(headers: &HeaderMap) -> Result<&str, NorylumError> {
     headers
         .get(AUTHORIZATION)
         .and_then(|h| h.to_str().ok())
@@ -69,7 +71,11 @@ pub(crate) async fn auth_middleware(
             .map_err(|_| NorylumError::Internal("Identifiant profil invalide".into()))?,
     );
 
-    headers.insert("x-device-id", HeaderValue::from_static("dev_authenticated"));
+    headers.insert(
+        "x-device-id",
+        HeaderValue::from_str(ctx.device_id().as_str())
+            .map_err(|_| NorylumError::Internal("Identifiant appareil invalide".into()))?,
+    );
 
     headers.insert(
         "x-is-child",
@@ -93,7 +99,12 @@ pub(crate) async fn login_handler(
     Json(payload): Json<LoginPayload>,
 ) -> Result<Json<LoginResponse>, NorylumError> {
     Ok(Json(
-        auth.login(&payload.username, &payload.password).await?,
+        auth.login_with_device(
+            &payload.username,
+            &payload.password,
+            payload.device_name.as_deref(),
+        )
+        .await?,
     ))
 }
 

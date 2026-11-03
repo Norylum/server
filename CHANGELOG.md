@@ -18,6 +18,27 @@ Elles ne constituent pas des publications de versions stables.
 
 ## [Unreleased]
 
+### Devices V1 — 2026-11-03
+
+**Added**
+- Identifiants d'appareils generes par le serveur.
+- Identifiants publics de sessions, distincts des jetons.
+- `GET /v1/devices` et `GET /v1/devices/sessions`.
+- Revocation d'un appareil ou d'une session par API.
+- Champ facultatif `device_name` a la connexion.
+- Migration additive des sessions historiques.
+- Tests de revocation et d'isolation entre comptes.
+
+**Security**
+- Gestion des appareils reservee au profil principal.
+- Controle du compte directement dans les requetes SQLite.
+- Aucune exposition des jetons dans les listes de sessions.
+- Identite de l'appareil provenant des sessions verifiees,
+  et non des en-tetes transmis par le client.
+- Changement de profil lie a l'appareil d'origine.
+
+---
+
 ### Profiles V3 — 2026-11-03
 
 **Added**
