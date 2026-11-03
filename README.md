@@ -521,3 +521,98 @@ respecter les exigences de logo et d'attribution TMDB.
 
 La provenance generique dans les fichiers ne garantit
 pas l'anonymat d'un serveur sur le reseau BitTorrent.
+
+
+## Metadata V2 — Tags internes MKV / MP4
+
+Norylum fournit un outil Rust pour ecrire les tags
+des films et episodes deja associes a TMDB.
+
+Outils requis :
+
+- `ffprobe` et `ffmpeg`.
+- `mkvextract` et `mkvpropedit` pour les MKV.
+
+Les tags ecrits sont :
+
+- `TMDB=movie/603` pour un film.
+- `TMDB=tv/1396` pour une serie.
+- `TV_SEASON` et `TV_EPISODE` pour un episode.
+- `NORYLUM_PROVENANCE=Norylum Server`.
+
+Aucun nom d'instance, adresse IP, compte ou domaine
+Norylum n'est ajoute par cet outil.
+
+La commande ne necessite pas le jeton TMDB :
+elle reutilise les associations de Metadata V1.
+
+### Utilisation hors ligne
+
+1. Indexer les medias avec Norylum.
+2. Associer les fiches TMDB via Metadata V1.
+3. Arreter le serveur et tout logiciel qui utilise,
+   telecharge ou partage le fichier.
+4. Previsualiser les tags :
+
+```bash id="82mpwh"
+cargo run -p norylum-server --bin norylum-metadata-tags -- \
+    --media-id med_ID
+```
+
+5. Ecrire les tags :
+
+```bash id="b3n5em"
+cargo run -p norylum-server --bin norylum-metadata-tags -- \
+    --media-id med_ID --apply
+```
+
+Le repertoire media est celui de NORYLUM_MEDIA_DIR,
+ou ./media en l'absence de cette variable.
+
+Le programme :
+- Refuse de fonctionner si le serveur Norylum
+  repond sur le port local 8120.
+- Refuse les fichiers modifies depuis moins de
+  30 secondes.
+- Cree une copie temporaire sur le meme volume.
+- Preserve les tags globaux MKV sans rapport avec
+  Norylum.
+- Utilise -c copy pour les MP4, sans reencodage.
+- Verifie les signatures techniques des pistes,
+  le nombre de chapitres et les nouveaux tags.
+- Revalide la taille et la date de modification
+  du fichier d'origine avant remplacement.
+- Conserve le fichier original en .bak.
+- Met a jour la taille enregistree dans SQLite.
+
+Cette verification ne constitue pas une preuve
+bit-a-bit de chaque piste. Une verification de
+lecture manuelle reste necessaire.
+
+Le fichier original n'est pas modifie directement.
+En cas de refus ou d'echec pendant la preparation,
+il reste en place.
+
+Le remplacement final s'effectue serveur arrete,
+par renommage sur le meme volume. En cas d'echec
+du second renommage, une restauration est tentee.
+La sauvegarde .bak reste disponible pour
+restauration manuelle.
+
+Les sauvegardes .bak sont volumineuses : verifier
+l'espace libre avant chaque operation.
+
+Attention : le controle du port 8120 ne detecte
+ni un autre lecteur externe, ni un client torrent
+tiers, ni une autre instance sur un port different.
+L'operateur doit s'assurer que le fichier n'est
+pas utilise. Le verrou partage avec le futur moteur
+torrent est prevu pour une prochaine etape.
+
+Les MP4 peuvent utiliser des champs mdta que
+certains lecteurs ne montrent pas.
+
+Ne jamais modifier un fichier en cours de seeding :
+modifier ses octets invaliderait les pieces du
+torrent. Le partage sera prepare apres l'ecriture
+finale des metadonnees.

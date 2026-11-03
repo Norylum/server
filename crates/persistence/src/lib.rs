@@ -13,6 +13,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+mod embedded_tags;
+pub use embedded_tags::EmbeddedMediaTags;
+
 mod metadata;
 mod playback_sync;
 mod playback_sync_v2;

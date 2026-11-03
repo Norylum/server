@@ -18,6 +18,35 @@ Elles ne constituent pas des publications de versions stables.
 
 ## [Unreleased]
 
+### Metadata V2 — 2026-11-03
+
+**Added**
+- Outil Rust hors ligne d'insertion de tags.
+- Identifiants TMDB dans MKV, MP4 et M4V.
+- Provenance generique Norylum Server.
+- Numeros de saison et episode pour les series.
+- Fusion des tags globaux Matroska existants.
+- Copie de securite originale avant remplacement.
+- Verification des pistes et des tags apres ecriture.
+- Tests de fusion XML et de resolution TMDB.
+
+**Security**
+- Mode previsualisation par defaut.
+- Refus si Norylum ecoute sur le port 8120.
+- Verification de stabilite du fichier source.
+- Aucune ecriture dans le conteneur en ligne.
+- Aucune identite d'instance ajoutee aux tags.
+
+**Notes**
+- Usage hors ligne pour eviter les conflits avec
+  le streaming et le futur seeding BitTorrent.
+- La detection de tous les consommateurs externes
+  du fichier n'est pas encore disponible.
+
+---
+
+
+
 ### Metadata V1 — 2026-11-03
 
 **Added**

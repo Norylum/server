@@ -1,4 +1,5 @@
 [package]
+default-run = "norylum-server"
 name = "norylum-server"
 version.workspace = true
 edition.workspace = true
@@ -19,9 +20,12 @@ norylum-streaming = { path = "../../crates/streaming" }
 norylum-playback = { path = "../../crates/playback" }
 norylum-api = { path = "../../crates/api" }
 norylum-persistence = { path = "../../crates/persistence" }
+norylum-metadata = { path = "../../crates/metadata" }
+xmltree = "0.11"
+rusqlite.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }
-uuid.workspace = true
 http-body-util.workspace = true
-serde_json.workspace = true
