@@ -1,7 +1,7 @@
 //! Routes HTTP et middleware d'authentification.
 
 use axum::{
-    extract::{Request, State},
+    extract::{Path, Request, State},
     http::{header::AUTHORIZATION, HeaderMap, HeaderValue, StatusCode},
     middleware::Next,
     response::Response,
@@ -21,6 +21,8 @@ pub(crate) struct LoginPayload {
 #[derive(Deserialize)]
 pub(crate) struct SwitchProfilePayload {
     profile_id: ProfileId,
+    #[serde(default)]
+    account_password: Option<String>,
 }
 
 fn bearer(headers: &HeaderMap) -> Result<&str, NorylumError> {
@@ -111,8 +113,12 @@ pub(crate) async fn switch_profile_handler(
     Json(payload): Json<SwitchProfilePayload>,
 ) -> Result<Json<LoginResponse>, NorylumError> {
     Ok(Json(
-        auth.switch_profile(bearer(&headers)?, &payload.profile_id)
-            .await?,
+        auth.switch_profile_with_password(
+            bearer(&headers)?,
+            &payload.profile_id,
+            payload.account_password.as_deref(),
+        )
+        .await?,
     ))
 }
 
@@ -132,4 +138,24 @@ pub(crate) async fn create_profile_handler(
 ) -> Result<(StatusCode, Json<norylum_profiles::ProfileRecord>), NorylumError> {
     let profile = profiles.create(&ctx, payload).await?;
     Ok((StatusCode::CREATED, Json(profile)))
+}
+
+/// PUT /v1/profiles/:profile_id
+pub(crate) async fn update_profile_handler(
+    State(profiles): State<Arc<norylum_profiles::ProfileService>>,
+    Extension(ctx): Extension<RequestContext>,
+    Path(profile_id): Path<ProfileId>,
+    Json(payload): Json<norylum_profiles::UpdateProfilePayload>,
+) -> Result<Json<norylum_profiles::ProfileRecord>, NorylumError> {
+    Ok(Json(profiles.update(&ctx, &profile_id, payload).await?))
+}
+
+/// DELETE /v1/profiles/:profile_id
+pub(crate) async fn delete_profile_handler(
+    State(profiles): State<Arc<norylum_profiles::ProfileService>>,
+    Extension(ctx): Extension<RequestContext>,
+    Path(profile_id): Path<ProfileId>,
+) -> Result<StatusCode, NorylumError> {
+    profiles.delete(&ctx, &profile_id).await?;
+    Ok(StatusCode::NO_CONTENT)
 }

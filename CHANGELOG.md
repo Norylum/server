@@ -23,6 +23,23 @@ ici avant leur intégration dans une version publiée.
 
 ### Added
 - Historique de développement maintenu dans `CHANGELOG.md`.
+- Profiles V2 : `PUT /v1/profiles/:profile_id`.
+- Profiles V2 : `DELETE /v1/profiles/:profile_id`.
+- Tests unitaires et HTTP des permissions de profils.
+
+### Changed
+- Le changement vers un profil adulte exige le mot de passe
+  du compte via `account_password`.
+
+### Security
+- Modification des profils reservee au profil principal.
+- Suppression du profil principal interdite.
+- Transformation du profil principal en enfant interdite.
+- Revocation atomique des sessions des profils modifies.
+- Suppression des sessions et progressions des profils supprimes.
+- Verification atomique de la session source et des droits
+  lors du changement de profil.
+
 
 ---
 

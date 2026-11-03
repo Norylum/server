@@ -229,6 +229,12 @@ pub fn create_router(state: AppState) -> Router {
             "/v1/profiles",
             axum::routing::get(auth_routes::list_profiles_handler)
                 .post(auth_routes::create_profile_handler)
+                .with_state(profiles.clone()),
+        )
+        .route(
+            "/v1/profiles/:profile_id",
+            axum::routing::put(auth_routes::update_profile_handler)
+                .delete(auth_routes::delete_profile_handler)
                 .with_state(profiles),
         )
         .route("/v1/auth/me", axum::routing::get(auth_routes::me_handler))

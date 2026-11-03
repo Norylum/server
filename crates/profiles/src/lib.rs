@@ -6,6 +6,9 @@ use norylum_persistence::Database;
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
+mod management;
+pub use management::UpdateProfilePayload;
+
 fn storage(e: impl std::fmt::Display) -> NorylumError {
     NorylumError::Internal(format!("Erreur profils SQLite : {e}"))
 }

@@ -217,8 +217,19 @@ Exemple de creation de profil enfant :
 }
 ```
 
-Cette premiere version ne comprend pas encore les codes PIN
-de profil, la modification ou la suppression des profils.
+Profiles V2 ajoute PUT /v1/profiles/:profile_id et
+DELETE /v1/profiles/:profile_id. Seul le profil principal
+peut modifier ou supprimer les profils secondaires.
+
+La modification revoque toutes les sessions du profil.
+La suppression revoque ses sessions et efface sa progression.
+Le profil principal ne peut pas etre supprime ni devenir enfant.
+
+Pour passer sur un profil adulte, l'endpoint
+POST /v1/auth/switch-profile exige maintenant le champ
+`account_password` en plus de `profile_id`.
+
+Les codes PIN individuels restent a implementer.
 Ne pas exposer le serveur publiquement.
 
 ## 📝 Historique des changements
