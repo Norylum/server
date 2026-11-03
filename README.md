@@ -445,3 +445,79 @@ media, et non d'un journal de chaque lecture.
 L'ancien POST /v1/playback/progress reste last-write-wins.
 Les clients compatibles V2 doivent utiliser
 l'ecriture avec operation_id et expected_revision.
+
+
+## Metadata V1 — TMDB, synopsis et affiches
+
+Norylum peut rechercher des films et series sur TMDB,
+puis associer manuellement leur identifiant aux
+enregistrements locaux.
+
+Configuration facultative au demarrage :
+
+- `NORYLUM_TMDB_READ_TOKEN` : API Read Access Token TMDB.
+
+Sans ce jeton, la lecture des fiches deja presentes
+dans SQLite fonctionne, mais les recherches et
+nouvelles associations TMDB sont indisponibles.
+
+Routes reservees au profil principal pour les
+recherches et les modifications :
+
+- `GET /v1/metadata/search?kind=movie&query=Matrix`
+- `GET /v1/metadata/search?kind=tv&query=Breaking%20Bad`
+- `GET /v1/metadata/media/:media_id/suggestions`
+- `GET /v1/metadata/shows/:show_id/suggestions`
+- `PUT /v1/metadata/media/:media_id`
+- `PUT /v1/metadata/shows/:show_id`
+
+Routes de consultation pour les profils autorises :
+
+- `GET /v1/metadata/media/:media_id`
+- `GET /v1/metadata/shows/:show_id`
+
+Exemple d'association manuelle :
+
+```json id="lt3atb"
+{
+  "tmdb_id": 603
+}
+```
+
+L'association recupere le detail officiel depuis TMDB.
+Elle stocke dans SQLite :
+
+- Le TMDB ID et le type : `movie/603` ou `tv/1396`.
+- Le titre et le synopsis en francais, si disponibles.
+- Le chemin de l'affiche et sa provenance TMDB.
+- La date de sortie ou de premiere diffusion.
+- La provenance generique `Norylum Server`.
+
+Aucun identifiant de l'instance Norylum, domaine, IP
+ou nom de serveur n'est stocke dans ces fiches.
+
+Les associations sont explicites : Norylum ne choisit
+pas automatiquement parmi des resultats ambigus.
+
+Les associations existantes sont conservees lors des
+rescans des memes medias. Une association manuelle
+peut etre corrigee avec un nouveau PUT.
+
+Metadata V1 ne modifie aucun fichier MKV, MP4 ou autre.
+L'ecriture des tags dans les conteneurs sera realisee
+dans Metadata V2, apres verification de l'integrite
+des fichiers et avant une eventuelle mise en torrent.
+
+Les images sont referencees par URL TMDB ; elles ne sont
+pas encore telechargees dans un cache d'images local.
+
+Attribution TMDB obligatoire pour les interfaces :
+
+"This product uses the TMDB API but is not endorsed or
+certified by TMDB."
+
+Les interfaces qui affichent ces donnees devront aussi
+respecter les exigences de logo et d'attribution TMDB.
+
+La provenance generique dans les fichiers ne garantit
+pas l'anonymat d'un serveur sur le reseau BitTorrent.

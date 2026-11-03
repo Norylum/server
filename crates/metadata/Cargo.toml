@@ -8,4 +8,6 @@ license.workspace = true
 norylum-foundation = { path = "../foundation" }
 serde.workspace = true
 regex.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
 

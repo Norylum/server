@@ -4,6 +4,7 @@
 
 mod auth_routes;
 mod device_routes;
+mod metadata_routes;
 mod playback_sync_routes;
 
 use axum::extract::{Path, State};
@@ -16,6 +17,7 @@ use norylum_catalog::{CatalogService, SeasonDetails, ShowDetails, ShowRecord};
 use norylum_devices::DeviceService;
 use norylum_foundation::{NorylumError, ShowId};
 use norylum_library::{MediaItem, MediaScanner};
+use norylum_metadata::TmdbClient;
 use norylum_playback::PlaybackService;
 use norylum_profiles::ProfileService;
 use norylum_streaming::StreamingState;
@@ -196,6 +198,38 @@ pub fn create_router(state: AppState) -> Router {
         authorizer: state.authorizer.clone(),
     };
 
+    let metadata_state = metadata_routes::MetadataState {
+        catalog: state.catalog.clone(),
+        authorizer: state.authorizer.clone(),
+        db: state.playback.db().clone(),
+        tmdb: TmdbClient::from_env(),
+    };
+
+    let metadata_routes = Router::new()
+        .route(
+            "/search",
+            axum::routing::get(metadata_routes::search_handler),
+        )
+        .route(
+            "/media/:media_id/suggestions",
+            axum::routing::get(metadata_routes::suggest_movie_handler),
+        )
+        .route(
+            "/media/:media_id",
+            axum::routing::get(metadata_routes::get_movie_handler)
+                .put(metadata_routes::set_movie_handler),
+        )
+        .route(
+            "/shows/:show_id/suggestions",
+            axum::routing::get(metadata_routes::suggest_show_handler),
+        )
+        .route(
+            "/shows/:show_id",
+            axum::routing::get(metadata_routes::get_show_handler)
+                .put(metadata_routes::set_show_handler),
+        )
+        .with_state(metadata_state);
+
     let library_routes = Router::new()
         .route("/scan", axum::routing::post(scan_library_handler))
         .route("/media", axum::routing::get(list_library_media_handler))
@@ -249,6 +283,7 @@ pub fn create_router(state: AppState) -> Router {
         .nest("/v1/library", library_routes)
         .nest("/v1/media", streaming_routes)
         .nest("/v1/playback", playback_routes)
+        .nest("/v1/metadata", metadata_routes)
         .route(
             "/v1/profiles",
             axum::routing::get(auth_routes::list_profiles_handler)

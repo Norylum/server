@@ -13,8 +13,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+mod metadata;
 mod playback_sync;
 mod playback_sync_v2;
+pub use metadata::MetadataRecord;
 
 pub use playback_sync_v2::SyncWriteOperation;
 
@@ -284,6 +286,9 @@ impl Database {
                 e
             ))
         })?;
+
+        conn.execute_batch(include_str!("metadata_migration.sql"))
+            .map_err(|e| NorylumError::Internal(format!("Migration metadata SQLite : {e}")))?;
 
         conn.execute_batch(include_str!("auth_migration.sql"))
             .map_err(|e| NorylumError::Internal(format!("Migration auth SQLite: {e}")))?;

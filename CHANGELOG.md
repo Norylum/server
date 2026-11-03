@@ -18,6 +18,34 @@ Elles ne constituent pas des publications de versions stables.
 
 ## [Unreleased]
 
+### Metadata V1 — 2026-11-03
+
+**Added**
+- Client HTTPS de consultation TMDB.
+- Recherche des films et series, en francais.
+- Suggestions d'association depuis les titres indexes.
+- Association manuelle par TMDB ID.
+- Cache SQLite des synopsis, titres et affiches.
+- Tables distinctes pour les films et les series.
+- Provenance generique `Norylum Server`.
+- Tests unitaires du client, de la persistance et de l'API.
+
+**Security**
+- Acces TMDB configure par jeton cote serveur.
+- Recherche et modification reservees au profil principal.
+- Lecture des fiches filtree par controle parental.
+- Aucun identifiant d'instance dans les metadonnees.
+- URLs d'affiches limitees au domaine officiel TMDB.
+
+**Notes**
+- Aucun fichier video modifie dans cette version.
+- L'association automatique reste volontairement desactivee.
+- Les appels TMDB reels necessitent un jeton valide.
+
+---
+
+
+
 ### Playback Sync V2 — 2026-11-03
 
 **Added**
