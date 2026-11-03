@@ -11,7 +11,11 @@ Norylum Docker
   scripts/norylum-docker.sh setup    Configuration initiale (une seule fois)
   scripts/norylum-docker.sh start    Construire et demarrer
   scripts/norylum-docker.sh stop     Arreter sans supprimer les donnees
-  scripts/norylum-docker.sh update   Sauvegarder SQLite + git pull + rebuild
+  scripts/norylum-docker.sh update   Sauvegarder SQLite + git pull + rebuild + healthcheck
+  scripts/norylum-docker.sh backup   Sauvegarder SQLite (WAL inclus)
+  scripts/norylum-docker.sh doctor   Diagnostic sans afficher les secrets
+  scripts/norylum-docker.sh restart-check
+                                    Redemarrer et verifier comptes/profils/TMDB
   scripts/norylum-docker.sh logs     Consulter les journaux
   scripts/norylum-docker.sh status   Etat et URL locale
   scripts/norylum-docker.sh scan     Scan authentifie sans token manuel
@@ -92,6 +96,70 @@ backup_db() {
   echo "Sauvegarde : media/.norylum-backups/$filename"
 }
 
+require_clean_dev() {
+  [[ "$(git branch --show-current)" == dev ]] || {
+    echo 'Mise a jour reservee a la branche dev' >&2; return 1;
+  }
+  [[ -z "$(git status --porcelain)" ]] || {
+    echo 'Arbre Git modifie: commit/stash requis avant update' >&2; return 1;
+  }
+}
+
+wait_healthy() {
+  local port i
+  port="$(sed -n 's/^NORYLUM_PORT=//p' .env | head -1)"
+  port="${port:-8120}"
+  for ((i=0; i<60; i++)); do
+    if curl --fail --silent --max-time 2        "http://127.0.0.1:${port}/health" >/dev/null; then
+      echo "OK: serveur sain sur 127.0.0.1:${port}"
+      return 0
+    fi
+    sleep 2
+  done
+  "${DC[@]}" logs --tail=80 server >&2 || true
+  echo 'Echec du controle de sante. Ne pas supprimer la sauvegarde SQLite.' >&2
+  return 1
+}
+
+# Stable identity fingerprint, not a database dump.
+# IDs and metadata associations must survive restart and image changes.
+identity_fingerprint() {
+  command -v sqlite3 >/dev/null || {
+    echo 'sqlite3 requis pour restart-check' >&2; return 1;
+  }
+  command -v shasum >/dev/null || {
+    echo 'shasum requis pour restart-check' >&2; return 1;
+  }
+  [[ -f media/norylum.sqlite3 ]] || {
+    echo 'Base SQLite absente' >&2; return 1;
+  }
+  sqlite3 -readonly media/norylum.sqlite3     "SELECT 'account:' || id FROM accounts
+     UNION ALL SELECT 'profile:' || id || ':' || account_id FROM profiles
+     UNION ALL SELECT 'movie:' || media_id || ':' || tmdb_id FROM media_metadata
+     UNION ALL SELECT 'show:' || show_id || ':' || tmdb_id FROM show_metadata
+     ORDER BY 1;" | shasum -a 256 | awk '{print $1}'
+}
+
+restart_check() {
+  require_config
+  command -v sqlite3 >/dev/null || {
+    echo 'Installer sqlite3 pour ce controle' >&2; return 1;
+  }
+  local before after
+  before="$(identity_fingerprint)"
+  echo 'Redemarrage du conteneur Norylum...'
+  "${DC[@]}" restart server
+  wait_healthy
+  after="$(identity_fingerprint)"
+  if [[ "$before" != "$after" ]]; then
+    echo 'ERREUR: comptes/profils/associations TMDB modifies apres restart' >&2
+    return 1
+  fi
+  # This calls the actual login endpoint without exposing the returned token.
+  api_call /v1/auth/me >/dev/null
+  echo 'OK: comptes, profils, associations TMDB et login admin conserves'
+}
+
 api_call() {
   local path="$1" token username port
   require_config
@@ -164,13 +232,18 @@ case "${1:-}" in
     ;;
   stop) "${DC[@]}" down ;;
   update)
-    if [[ ! -f .env ]]; then echo 'Executer setup avant update' >&2; exit 1; fi
+    require_config
+    require_clean_dev
     backup_db
     git pull --ff-only origin dev
     "${DC[@]}" build --pull
     "${DC[@]}" up -d --no-deps --force-recreate server
+    wait_healthy
     "${DC[@]}" ps
     ;;
+  backup) require_config; backup_db ;;
+  doctor) scripts/norylum-doctor.sh ;;
+  restart-check) restart_check ;;
   logs) "${DC[@]}" logs -f --tail=100 server ;;
   status) "${DC[@]}" ps; echo "URL locale : http://127.0.0.1:$(sed -n 's/^NORYLUM_PORT=//p' .env | head -1)" ;;
   scan) scan ;;

@@ -729,3 +729,41 @@ produire `.ready` a la fin du transfert.
 
 L'association TMDB et l'ecriture MKV/MP4 sont pour l'instant des operations
 separees. Aucun moteur torrent ni seeding automatique n'est active.
+
+
+## Docker reliability V1 - single-instance media volume lock
+
+The server and offline `norylum-metadata-tags --apply` both acquire
+`media/.norylum-instance.lock` through an operating-system advisory lock.
+The lock is automatically released when the process exits or crashes.
+The lock file itself stays in place and must not be manually deleted.
+This prevents two cooperating Norylum server instances or the offline
+metadata writer from accessing the same media volume concurrently.
+
+**Limitations:** this does not lock external video players, download
+clients or BitTorrent seeders; they do not participate in the protocol.
+The current server can still stream while its ingestion worker publishes
+other files. A per-file reader/writer lease and torrent lifecycle controls
+are required before enabling torrent seeding. Advisory lock behavior across
+Docker Desktop bind mounts should be checked on each target platform.
+
+Docker maintenance commands:
+
+```bash
+scripts/norylum-docker.sh doctor
+scripts/norylum-docker.sh backup
+scripts/norylum-docker.sh restart-check
+scripts/norylum-docker.sh update
+```
+
+`restart-check` verifies that account/profile IDs, TMDB associations,
+and admin authentication survive a restart. It does not print passwords
+or access tokens. `update` requires a clean `dev` branch, creates an
+online SQLite backup before pulling changes, rebuilds, and verifies the
+HTTP health endpoint. A failed healthcheck does not mean the database
+should be rolled back automatically: inspect the logs and backup first.
+
+Do not run the native server and Docker server on the same media volume.
+For a new system, provide matching existing admin credentials during setup
+if importing a populated SQLite database; Norylum never resets the existing
+admin password when starting a container.

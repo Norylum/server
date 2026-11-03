@@ -18,6 +18,17 @@ Elles ne constituent pas des publications de versions stables.
 
 ## [Unreleased]
 
+### Docker hardening - process lock and maintenance checks
+
+- Exclusive OS-level volume lock shared by the server and offline metadata writer.
+- Rejects second Norylum process on the same media directory.
+- `doctor`, `backup` and `restart-check` commands.
+- `update` refuses a dirty Git tree and verifies service health after rebuild.
+- Keeps admin identities, TMDB associations and SQLite on persistent storage.
+- External clients and torrent seeders are not yet covered by these locks.
+
+
+
 ### Library Ingestion V2 + Docker (2026-11-03)
 
 - Worker d'ingestion automatique sur marqueurs `.ready` (polling configurable).

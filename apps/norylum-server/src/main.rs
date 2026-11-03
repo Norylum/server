@@ -1,6 +1,8 @@
 //! Binaire principal `norylum-server`.
 //! Monolithe modulaire haute performance pour l'écosystème Norylum.
 
+mod instance_lock;
+
 use norylum_api::{create_router, AppState};
 use norylum_authorization::DefaultAuthorizer;
 use norylum_catalog::CatalogService;
@@ -34,6 +36,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let canonical_media_dir = std::fs::canonicalize(&media_dir)?;
     tracing::info!(media_dir = ?canonical_media_dir, "Répertoire média configuré");
+
+    // Held for the whole server lifetime, released by the OS on crash/exit.
+    // Prevents a second Norylum instance or offline tag writer from opening
+    // the same media volume. Does not coordinate external media/torrent tools.
+    let _instance_lock = instance_lock::InstanceLock::acquire(&canonical_media_dir)?;
 
     // Initialisation de la persistance SQLite local-first (WAL + migrations automatiques)
     let db_path = canonical_media_dir.join("norylum.sqlite3");

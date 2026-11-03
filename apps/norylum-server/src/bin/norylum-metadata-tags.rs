@@ -2,14 +2,16 @@
 //! This command MUST NOT run while Norylum or a torrent
 //! client is serving the media file.
 
+#[path = "../instance_lock.rs"]
+mod instance_lock;
+
 use norylum_foundation::{MediaId, NorylumError};
 use norylum_library::PathSanitizer;
 use norylum_persistence::{Database, EmbeddedMediaTags};
 use serde_json::{json, Value};
 use std::{
     env, fs,
-    fs::{File, OpenOptions},
-    net::{SocketAddr, TcpStream},
+    fs::File,
     path::{Path, PathBuf},
     process::Command,
     time::Duration,
@@ -339,41 +341,6 @@ impl Drop for TemporaryFiles {
     }
 }
 
-/// Prevents two offline tag writers from overlapping.
-struct WriteLock(PathBuf);
-
-impl WriteLock {
-    fn acquire(root: &Path) -> Result<Self, NorylumError> {
-        let path = root.join(".norylum-metadata-write.lock");
-
-        OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-            .map_err(|e| internal(format!("Verrou Metadata V2 : {e}")))?;
-
-        Ok(Self(path))
-    }
-}
-
-impl Drop for WriteLock {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.0);
-    }
-}
-
-fn ensure_server_stopped() -> Result<(), NorylumError> {
-    let address = SocketAddr::from(([127, 0, 0, 1], 8120));
-
-    if TcpStream::connect_timeout(&address, Duration::from_millis(250)).is_ok() {
-        return Err(NorylumError::Validation(
-            "Arreter le serveur Norylum avant l'ecriture".into(),
-        ));
-    }
-
-    Ok(())
-}
-
 fn usage() {
     println!(
         "Utilisation : \
@@ -411,6 +378,18 @@ async fn run() -> Result<(), NorylumError> {
     let root = env::var("NORYLUM_MEDIA_DIR").unwrap_or_else(|_| "./media".into());
 
     let root = fs::canonicalize(root)?;
+
+    // Preview remains read-only. Applying changes requires exclusive access
+    // to the volume, including when the server uses a non-default port.
+    let _instance_lock = if apply {
+        Some(instance_lock::InstanceLock::acquire(&root).map_err(|e| {
+            NorylumError::Conflict(format!(
+                "Arreter Norylum et les autres writers avant --apply : {e}"
+            ))
+        })?)
+    } else {
+        None
+    };
 
     let db_path = root.join("norylum.sqlite3");
 
@@ -484,8 +463,6 @@ async fn run() -> Result<(), NorylumError> {
         return Ok(());
     }
 
-    ensure_server_stopped()?;
-
     let age = original_info.modified()?.elapsed().unwrap_or_default();
 
     if age < Duration::from_secs(30) {
@@ -495,8 +472,6 @@ async fn run() -> Result<(), NorylumError> {
                 .into(),
         ));
     }
-
-    let _write_lock = WriteLock::acquire(&root)?;
 
     let parent = source
         .parent()
