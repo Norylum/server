@@ -2,6 +2,9 @@
 //! Gère l'inspection multimédia via ffprobe, la génération d'index technique déterministe
 //! et la protection stricte contre le Directory Traversal.
 
+pub mod ingestion;
+pub use ingestion::IngestionService;
+
 use norylum_foundation::{MediaId, NorylumError};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -285,6 +288,12 @@ impl MediaScanner {
                 let path = entry.path();
 
                 if path.is_dir() {
+                    // Never expose a partially transferred staging file.
+                    if current_dir == canonical_root
+                        && path.file_name() == Some(std::ffi::OsStr::new(".norylum-staging"))
+                    {
+                        continue;
+                    }
                     dir_queue.push(path);
                 } else if path.is_file() {
                     let ext = path
@@ -443,5 +452,25 @@ mod tests {
 
         // Clean up
         let _ = std::fs::remove_dir_all(base_tmp);
+    }
+}
+
+#[cfg(test)]
+mod ingestion_scanner_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn staging_is_never_scanned() {
+        let root =
+            std::env::temp_dir().join(format!("norylum_ingestion_scan_{}", uuid::Uuid::new_v4()));
+        let staging = root.join(".norylum-staging");
+        std::fs::create_dir_all(&staging).unwrap();
+        std::fs::write(staging.join("unfinished.mkv"), b"incomplete").unwrap();
+        std::fs::write(root.join("visible.mkv"), b"movie").unwrap();
+
+        let items = MediaScanner::new(&root).scan().await.unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].relative_path, "visible.mkv");
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -4,6 +4,7 @@
 
 mod auth_routes;
 mod device_routes;
+mod ingestion_routes;
 mod metadata_routes;
 mod playback_sync_routes;
 
@@ -16,7 +17,7 @@ use norylum_authorization::Authorizer;
 use norylum_catalog::{CatalogService, SeasonDetails, ShowDetails, ShowRecord};
 use norylum_devices::DeviceService;
 use norylum_foundation::{NorylumError, ShowId};
-use norylum_library::{MediaItem, MediaScanner};
+use norylum_library::{IngestionService, MediaItem, MediaScanner};
 use norylum_metadata::TmdbClient;
 use norylum_playback::PlaybackService;
 use norylum_profiles::ProfileService;
@@ -33,6 +34,8 @@ pub struct AppState {
     pub authorizer: Arc<dyn Authorizer>,
     pub playback: Arc<PlaybackService>,
     pub scanner: Arc<MediaScanner>,
+    pub ingestion: Arc<IngestionService>,
+    pub scan_lock: Arc<tokio::sync::Mutex<()>>,
     pub auth: Arc<AuthService>,
     pub devices: Arc<DeviceService>,
     pub profiles: Arc<ProfileService>,
@@ -46,6 +49,7 @@ impl AppState {
         playback: Arc<PlaybackService>,
     ) -> Self {
         let scanner = Arc::new(MediaScanner::new(library_root.clone()));
+        let ingestion = Arc::new(IngestionService::new(library_root.clone()));
         let auth = Arc::new(AuthService::new(playback.db().clone()));
         let devices = Arc::new(DeviceService::new(playback.db().clone()));
         let profiles = Arc::new(ProfileService::new(playback.db().clone()));
@@ -55,6 +59,8 @@ impl AppState {
             authorizer,
             playback,
             scanner,
+            ingestion,
+            scan_lock: Arc::new(tokio::sync::Mutex::new(())),
             auth,
             devices,
             profiles,
@@ -82,9 +88,11 @@ pub async fn scan_library_handler(
         "Déclenchement du scan de la bibliothèque média"
     );
 
+    let _guard = state.scan_lock.lock().await;
     let items = state.scanner.scan().await?;
     let count = items.len();
-    state.catalog.replace_all(items).await;
+    // Propagate SQLite failures rather than returning a false positive.
+    state.playback.db().sync_media_items(&items).await?;
 
     Ok(Json(ScanResponse {
         scanned_count: count,
@@ -232,6 +240,10 @@ pub fn create_router(state: AppState) -> Router {
 
     let library_routes = Router::new()
         .route("/scan", axum::routing::post(scan_library_handler))
+        .route(
+            "/ingest/ready",
+            axum::routing::post(ingestion_routes::notify_file_ready_handler),
+        )
         .route("/media", axum::routing::get(list_library_media_handler))
         .route("/movies", axum::routing::get(list_library_movies_handler))
         .route("/shows", axum::routing::get(list_library_shows_handler))

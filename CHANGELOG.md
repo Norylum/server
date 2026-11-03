@@ -18,6 +18,16 @@ Elles ne constituent pas des publications de versions stables.
 
 ## [Unreleased]
 
+### Library Ingestion V1 — 2026-11-03
+
+- Protected `POST /v1/library/ingest/ready` for the principal profile.
+- Isolated `.norylum-staging` folder excluded from media scanning.
+- Explicit complete-file notification, two-point stability check, strict ffprobe.
+- No-overwrite hard-link publication, rollback on index failure.
+- Serialized scans, durable SQLite catalog updates, stable media IDs.
+- Path validation and HTTP/scan regression tests.
+
+
 ### Metadata V2 — 2026-11-03
 
 **Added**

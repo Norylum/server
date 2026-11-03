@@ -616,3 +616,35 @@ Ne jamais modifier un fichier en cours de seeding :
 modifier ses octets invaliderait les pieces du
 torrent. Le partage sera prepare apres l'ecriture
 finale des metadonnees.
+
+
+## Library Ingestion V1: explicit notify_file_ready
+
+Trusted local operators copy completed media into `media/.norylum-staging/`.
+This directory is excluded from the library scanner and not exposed to viewers.
+For example, place a complete `Example (2020).mkv` there (do not test on an
+existing film). After closing the transfer writer and letting the file remain
+unchanged for at least 30 seconds, a principal Norylum profile may call:
+
+```bash
+curl -i -X POST http://127.0.0.1:8120/v1/library/ingest/ready \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  --data '{"source":"Example (2020).mkv","destination":"Example (2020).mkv"}'
+```
+
+The server waits two seconds to confirm size and modification time stability,
+requires a valid video stream reported by `ffprobe`, rejects traversal, hidden
+paths and symlinks, and creates the final directory entry without replacing
+an existing file. It reindexes the full catalog inside a SQLite transaction;
+if scanning or indexing fails, the final hard link is removed and staging
+remains available for retry. Successful results return HTTP 201 with the
+indexed `media` and `staging_removed` flag.
+
+This V1 endpoint is deliberately a *ready notification*, not a multipart
+upload or filesystem watcher. The external transfer must be complete before
+notification. It does not identify or tag media automatically and never
+starts torrent sharing. TMDB association and file tagging remain separate.
+For cross-filesystem mounts, hard-link publication is unsupported. A shared
+file lock with external downloaders and the future torrent engine will be a
+separate version; do not ingest a file while another process is writing it.
