@@ -161,6 +161,92 @@ impl Database {
         .await
     }
 
+    pub async fn approve_acquisition_request(
+        &self,
+        account_id: &AccountId,
+        id: &str,
+    ) -> Result<AcquisitionRequest, NorylumError> {
+        self.transition_acquisition_request(account_id, id, true)
+            .await
+    }
+
+    pub async fn cancel_acquisition_request(
+        &self,
+        account_id: &AccountId,
+        id: &str,
+    ) -> Result<AcquisitionRequest, NorylumError> {
+        self.transition_acquisition_request(account_id, id, false)
+            .await
+    }
+
+    async fn transition_acquisition_request(
+        &self,
+        account_id: &AccountId,
+        id: &str,
+        approve: bool,
+    ) -> Result<AcquisitionRequest, NorylumError> {
+        let account = account_id.as_str().to_owned();
+        let id = id.to_owned();
+        let target = if approve { "approved" } else { "cancelled" };
+        let now = Utc::now().to_rfc3339();
+
+        self.with_connection(|conn| {
+            let tx = conn
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(storage)?;
+
+            let changed = tx
+                .execute(
+                    "UPDATE acquisition_requests
+                     SET status=?3, updated_at=?4
+                     WHERE account_id=?1 AND id=?2
+                       AND (
+                         (?3='approved' AND status='awaiting_approval')
+                         OR
+                         (?3='cancelled' AND status IN (
+                           'awaiting_approval','approved'
+                         ))
+                       )",
+                    params![&account, &id, target, &now],
+                )
+                .map_err(storage)?;
+
+            if changed == 0 {
+                let current: Option<String> = tx
+                    .query_row(
+                        "SELECT status FROM acquisition_requests
+                         WHERE account_id=?1 AND id=?2",
+                        params![&account, &id],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .map_err(storage)?;
+
+                return match current {
+                    None => Err(NorylumError::NotFound(
+                        "Demande d'acquisition introuvable".into(),
+                    )),
+                    Some(status) => Err(NorylumError::Conflict(format!(
+                        "Transition refusee depuis l'etat {status}"
+                    ))),
+                };
+            }
+
+            let query = format!(
+                "SELECT {COLUMNS} FROM acquisition_requests
+                 WHERE account_id=?1 AND id=?2"
+            );
+
+            let request = tx
+                .query_row(&query, params![&account, &id], map_request)
+                .map_err(storage)?;
+
+            tx.commit().map_err(storage)?;
+            Ok(request)
+        })
+        .await
+    }
+
     pub async fn list_acquisition_requests(
         &self,
         account_id: &AccountId,
@@ -204,5 +290,115 @@ impl Database {
                 .map_err(storage)
         })
         .await
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    use norylum_foundation::{AccountId, ProfileId};
+
+    #[tokio::test]
+    async fn approval_survives_restart_and_cancellation_releases_slot() {
+        let root =
+            std::env::temp_dir().join(format!("norylum-acquisition-v2-{}", uuid::Uuid::new_v4()));
+
+        std::fs::create_dir(&root).unwrap();
+
+        let path = root.join("test.sqlite3");
+        let account = AccountId::new("acc_test");
+        let profile = ProfileId::new("prof_test");
+
+        let db = Database::open(&path).unwrap();
+
+        let first = db
+            .request_acquisition(
+                &account, &profile, "movie", 987654321, None, None, "1080p", "fr",
+            )
+            .await
+            .unwrap();
+
+        let approved = db
+            .approve_acquisition_request(&account, &first.id)
+            .await
+            .unwrap();
+
+        assert_eq!(approved.status, "approved");
+
+        drop(db);
+
+        // Simulates reopening SQLite after an application restart.
+        let reopened = Database::open(&path).unwrap();
+
+        let persisted = reopened
+            .get_acquisition_request(&account, &first.id)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(persisted.status, "approved");
+
+        assert!(reopened
+            .approve_acquisition_request(&account, &first.id)
+            .await
+            .is_err());
+
+        let other_account = AccountId::new("acc_other");
+
+        assert!(reopened
+            .cancel_acquisition_request(&other_account, &first.id)
+            .await
+            .is_err());
+
+        let cancelled = reopened
+            .cancel_acquisition_request(&account, &first.id)
+            .await
+            .unwrap();
+
+        assert_eq!(cancelled.status, "cancelled");
+
+        let second = reopened
+            .request_acquisition(
+                &account, &profile, "movie", 987654321, None, None, "1080p", "fr",
+            )
+            .await
+            .unwrap();
+
+        assert_ne!(second.id, first.id);
+        assert_eq!(second.status, "awaiting_approval");
+
+        // Future worker states must not be cancelled by this API:
+        // it has no download-stop handshake yet.
+        reopened
+            .with_connection(|conn| {
+                conn.execute(
+                    "UPDATE acquisition_requests
+                     SET status='downloading'
+                     WHERE id=?1 AND account_id=?2",
+                    params![&second.id, account.as_str()],
+                )
+                .map_err(storage)?;
+
+                Ok(())
+            })
+            .await
+            .unwrap();
+
+        assert!(reopened
+            .cancel_acquisition_request(&account, &second.id)
+            .await
+            .is_err());
+
+        let unchanged = reopened
+            .get_acquisition_request(&account, &second.id)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(unchanged.status, "downloading");
+
+        drop(reopened);
+
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

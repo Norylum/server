@@ -252,6 +252,14 @@ pub fn create_router(state: AppState) -> Router {
             "/requests/:id",
             axum::routing::get(acquisition_routes::get_handler),
         )
+        .route(
+            "/requests/:id/approve",
+            axum::routing::post(acquisition_routes::approve_handler),
+        )
+        .route(
+            "/requests/:id/cancel",
+            axum::routing::post(acquisition_routes::cancel_handler),
+        )
         .with_state(state.clone());
 
     let torrent_routes = Router::new()

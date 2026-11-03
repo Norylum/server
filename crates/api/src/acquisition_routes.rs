@@ -40,6 +40,12 @@ async fn principal(state: &AppState, ctx: &RequestContext) -> Result<(), Norylum
     Ok(())
 }
 
+fn valid_request_id(id: &str) -> bool {
+    id.strip_prefix("acq_").is_some_and(|suffix| {
+        suffix.len() == 32 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
+    })
+}
+
 /// POST /v1/acquisition/requests
 pub(crate) async fn create_handler(
     State(state): State<AppState>,
@@ -86,6 +92,52 @@ pub(crate) async fn list_handler(
     ))
 }
 
+/// POST /v1/acquisition/requests/:id/approve
+pub(crate) async fn approve_handler(
+    State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
+    Path(id): Path<String>,
+) -> Result<Json<AcquisitionRequest>, NorylumError> {
+    principal(&state, &ctx).await?;
+
+    if !valid_request_id(&id) {
+        return Err(NorylumError::NotFound(
+            "Demande d'acquisition introuvable".into(),
+        ));
+    }
+
+    let request = state
+        .playback
+        .db()
+        .approve_acquisition_request(ctx.account_id(), &id)
+        .await?;
+
+    Ok(Json(request))
+}
+
+/// POST /v1/acquisition/requests/:id/cancel
+pub(crate) async fn cancel_handler(
+    State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
+    Path(id): Path<String>,
+) -> Result<Json<AcquisitionRequest>, NorylumError> {
+    principal(&state, &ctx).await?;
+
+    if !valid_request_id(&id) {
+        return Err(NorylumError::NotFound(
+            "Demande d'acquisition introuvable".into(),
+        ));
+    }
+
+    let request = state
+        .playback
+        .db()
+        .cancel_acquisition_request(ctx.account_id(), &id)
+        .await?;
+
+    Ok(Json(request))
+}
+
 /// GET /v1/acquisition/requests/:id
 pub(crate) async fn get_handler(
     State(state): State<AppState>,
@@ -94,7 +146,7 @@ pub(crate) async fn get_handler(
 ) -> Result<Json<AcquisitionRequest>, NorylumError> {
     principal(&state, &ctx).await?;
 
-    if id.len() != 36 || !id.starts_with("acq_") {
+    if !valid_request_id(&id) {
         return Err(NorylumError::NotFound(
             "Demande d'acquisition introuvable".into(),
         ));

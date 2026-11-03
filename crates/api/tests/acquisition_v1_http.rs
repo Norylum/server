@@ -181,3 +181,132 @@ async fn acquisition_requires_principal_and_is_deduplicated() {
     assert_eq!(episode["episode"], 2);
     assert_eq!(episode["status"], "awaiting_approval");
 }
+
+#[tokio::test]
+async fn acquisition_v2_approval_and_cancellation() {
+    let db = Database::in_memory().unwrap();
+    let state = AppState::new(
+        std::env::temp_dir(),
+        Arc::new(CatalogService::new(db.clone())),
+        Arc::new(DefaultAuthorizer::new()),
+        Arc::new(PlaybackService::new(db)),
+    );
+
+    let auth = state.auth.clone();
+    let password = "acquisition-v2-test-password-2026";
+
+    auth.bootstrap_admin("admin", password).await.unwrap();
+
+    let adult = auth.login("admin", password).await.unwrap();
+
+    let child_id = auth
+        .create_profile(&adult.account_id, "Junior", true, Some(10))
+        .await
+        .unwrap();
+
+    let child = auth
+        .switch_profile(&adult.access_token, &child_id)
+        .await
+        .unwrap();
+
+    let app = create_router(state);
+    let endpoint = "/v1/acquisition/requests";
+
+    let payload = json!({
+        "kind": "movie",
+        "tmdb_id": 987654321,
+        "quality_profile": "1080p",
+        "language": "fr"
+    });
+
+    let (status, pending) = call(
+        &app,
+        "POST",
+        endpoint,
+        Some(&adult.access_token),
+        Some(payload.clone()),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(pending["status"], "awaiting_approval");
+
+    let id = pending["id"].as_str().unwrap().to_owned();
+    let approve = format!("{endpoint}/{id}/approve");
+    let cancel = format!("{endpoint}/{id}/cancel");
+
+    assert_eq!(
+        call(&app, "POST", &approve, None, None).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+
+    assert_eq!(
+        call(&app, "POST", &approve, Some(&child.access_token), None,)
+            .await
+            .0,
+        StatusCode::FORBIDDEN
+    );
+
+    let (status, approved) = call(&app, "POST", &approve, Some(&adult.access_token), None).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(approved["status"], "approved");
+
+    // Reapproval is a conflict, not an implicit success.
+    assert_eq!(
+        call(&app, "POST", &approve, Some(&adult.access_token), None,)
+            .await
+            .0,
+        StatusCode::CONFLICT
+    );
+
+    let (status, cancelled) = call(&app, "POST", &cancel, Some(&adult.access_token), None).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(cancelled["status"], "cancelled");
+
+    assert_eq!(
+        call(&app, "POST", &cancel, Some(&adult.access_token), None,)
+            .await
+            .0,
+        StatusCode::CONFLICT
+    );
+
+    assert_eq!(
+        call(&app, "POST", &approve, Some(&adult.access_token), None,)
+            .await
+            .0,
+        StatusCode::CONFLICT
+    );
+
+    let (status, fresh) = call(
+        &app,
+        "POST",
+        endpoint,
+        Some(&adult.access_token),
+        Some(payload),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_ne!(fresh["id"], pending["id"]);
+    assert_eq!(fresh["status"], "awaiting_approval");
+
+    let fresh_cancel = format!("{endpoint}/{}/cancel", fresh["id"].as_str().unwrap());
+
+    let (status, cancelled_pending) =
+        call(&app, "POST", &fresh_cancel, Some(&adult.access_token), None).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(cancelled_pending["status"], "cancelled");
+
+    // A nonexistent but well-formed request must return 404.
+    let missing = format!("{endpoint}/acq_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/approve");
+
+    assert_eq!(
+        call(&app, "POST", &missing, Some(&adult.access_token), None,)
+            .await
+            .0,
+        StatusCode::NOT_FOUND
+    );
+}

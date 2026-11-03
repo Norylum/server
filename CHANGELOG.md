@@ -18,6 +18,18 @@ Elles ne constituent pas des publications de versions stables.
 
 ## [Unreleased]
 
+### Acquisition V2 - Request lifecycle controls
+
+- Added principal-only approval and cancellation endpoints.
+- Enforced atomic SQLite state transitions.
+- Rejected duplicate or invalid state transitions.
+- Prevented unsafe cancellation of in-progress downloads.
+- Preserved request history and account isolation.
+- Added HTTP authorization and persistence restart tests.
+- Approval never starts a downloader without VPN validation.
+
+
+
 ### Acquisition V1 - Initial security and request foundation
 
 - Added Gluetun network isolation for torrent seeding.

@@ -1085,3 +1085,29 @@ are future stages.
 
 TMDB identifies content but does not provide the
 downloadable video file.
+
+## Acquisition V2 - Request lifecycle
+
+Authenticated principal-profile routes:
+
+    POST /v1/acquisition/requests/:id/approve
+    POST /v1/acquisition/requests/:id/cancel
+
+Allowed transitions:
+
+    awaiting_approval -> approved
+    awaiting_approval -> cancelled
+    approved -> cancelled
+
+Invalid transitions return HTTP 409.
+Unknown request identifiers return HTTP 404.
+Unauthenticated requests return HTTP 401.
+
+Cancellation of searching, downloading or processing
+is deliberately refused until worker cancellation
+and acknowledgement are implemented.
+
+Approved requests remain pending in SQLite.
+No source search or download starts automatically.
+VPN and leak protection remain mandatory
+before enabling acquisition network workers.
