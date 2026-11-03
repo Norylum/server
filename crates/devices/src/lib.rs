@@ -24,6 +24,9 @@ fn token_hash(token: &str) -> Result<String, NorylumError> {
     Ok(format!("{:x}", Sha256::digest(token.as_bytes())))
 }
 
+mod lifecycle;
+pub use lifecycle::MaintenanceReport;
+
 #[derive(Debug, Clone, Serialize)]
 pub struct DeviceRecord {
     pub id: DeviceId,

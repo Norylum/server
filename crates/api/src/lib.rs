@@ -263,8 +263,18 @@ pub fn create_router(state: AppState) -> Router {
                 .with_state(devices.clone()),
         )
         .route(
+            "/v1/devices/maintenance",
+            axum::routing::post(device_routes::maintenance_handler).with_state(devices.clone()),
+        )
+        .route(
+            "/v1/devices/:device_id/history",
+            axum::routing::delete(device_routes::forget_device_handler).with_state(devices.clone()),
+        )
+        .route(
             "/v1/devices/:device_id",
-            axum::routing::delete(device_routes::revoke_device_handler).with_state(devices),
+            axum::routing::delete(device_routes::revoke_device_handler)
+                .patch(device_routes::rename_device_handler)
+                .with_state(devices),
         )
         .route("/v1/auth/me", axum::routing::get(auth_routes::me_handler))
         .route(

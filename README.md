@@ -307,3 +307,38 @@ session active restent visibles dans l'historique.
 Une nouvelle connexion avec le bon mot de passe cree une
 nouvelle entree appareil : la revocation ne constitue pas
 une interdiction permanente de reconnexion.
+
+
+## Devices V2 — Cycle de vie
+
+Le profil principal peut gerer le nom des appareils et
+nettoyer l'historique de ses connexions.
+
+Routes :
+
+- `PATCH /v1/devices/:device_id` : renommer un appareil.
+- `POST /v1/devices/maintenance` : nettoyer le compte.
+- `DELETE /v1/devices/:device_id/history` : oublier
+  un appareil sans session.
+
+Exemple pour renommer :
+
+```json
+{
+  "name": "Television du salon"
+}
+```
+
+La maintenance est explicite : elle n'est pas lancee
+periodiquement par le serveur.
+
+Elle supprime les sessions expirees du compte courant,
+puis les appareils sans aucune session et dont la
+derniere activite remonte a plus de 30 jours.
+
+Un appareil ayant encore des sessions ne peut pas etre
+oublie. Il faut d'abord revoquer ces sessions ou
+executer la maintenance si elles sont expirees.
+
+Le nettoyage ne modifie pas les autres comptes,
+les profils ou la progression de lecture.

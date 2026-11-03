@@ -18,6 +18,23 @@ Elles ne constituent pas des publications de versions stables.
 
 ## [Unreleased]
 
+### Devices V2 — 2026-11-03
+
+**Added**
+- Renommage des appareils par API.
+- Maintenance explicite des sessions expirees.
+- Retention de 30 jours pour les appareils inactifs.
+- Suppression volontaire de l'historique d'un appareil.
+- Tests du nettoyage et de l'isolation entre comptes.
+
+**Security**
+- Gestion reservee au profil principal.
+- Refus de supprimer un appareil ayant encore des sessions.
+- Nettoyage transactionnel et strictement limite au compte.
+- Conservation des appareils ayant des sessions actives.
+
+---
+
 ### Devices V1 — 2026-11-03
 
 **Added**
