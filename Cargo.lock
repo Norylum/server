@@ -2267,6 +2267,7 @@ dependencies = [
  "norylum-foundation",
  "norylum-library",
  "norylum-metadata",
+ "reqwest 0.12.28",
  "rusqlite",
  "serde",
  "thiserror 1.0.69",

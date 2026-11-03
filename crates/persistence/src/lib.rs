@@ -19,6 +19,9 @@ pub use acquisition::AcquisitionRequest;
 mod acquisition_worker;
 pub use acquisition_worker::AcquisitionLease;
 
+mod acquisition_sources;
+pub use acquisition_sources::AuthorizedAcquisitionSource;
+
 mod torrent;
 pub use torrent::{TorrentSettings, TorrentShare};
 
@@ -310,6 +313,9 @@ impl Database {
 
         conn.execute_batch(include_str!("acquisition_worker_migration.sql"))
             .map_err(|e| NorylumError::Internal(format!("Migration Acquisition Worker : {e}")))?;
+
+        conn.execute_batch(include_str!("acquisition_sources_migration.sql"))
+            .map_err(|e| NorylumError::Internal(format!("Migration Acquisition Sources : {e}")))?;
 
         conn.execute_batch(include_str!("torrent_migration.sql"))
             .map_err(|e| NorylumError::Internal(format!("Migration Torrent V2 : {e}")))?;

@@ -26,6 +26,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     db.approve_acquisition_request(&account, &request.id)
         .await?;
 
+    db.register_acquisition_source(
+        &account,
+        &request.id,
+        "https://cdn.example.org/offline-test.mp4",
+        &"c".repeat(64),
+        &["cdn.example.org".to_owned()],
+    )
+    .await?;
+
     let lease = db
         .claim_next_approved_acquisition()
         .await?

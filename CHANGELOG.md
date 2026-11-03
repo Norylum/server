@@ -18,6 +18,16 @@ Elles ne constituent pas des publications de versions stables.
 
 ## [Unreleased]
 
+### Acquisition V3.2 - Authorized source registry
+
+- Added immutable HTTPS source records per acquisition request.
+- Required explicit trusted-host matching and a SHA-256 digest.
+- Prevented claiming approved requests without an authorized source.
+- Restricted source lookup to the current non-expired worker lease.
+- Added URL validation, account-isolation and token-fencing tests.
+- Kept all acquisition networking disabled.
+
+
 ### Acquisition V3.1 - Worker reservation engine
 
 - Added atomic acquisition claims with 90-second leases.

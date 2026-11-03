@@ -1127,3 +1127,23 @@ No download, seeding, or automatic ingestion is activated.
 
 Do not activate real acquisition until Gluetun leak tests
 and authorized-source validation have succeeded.
+
+## Acquisition V3.2 - Authorized sources
+
+An approved acquisition is not eligible for a worker claim
+until a trusted source is explicitly registered.
+
+Sources are immutable, bound to a specific account request,
+require a valid HTTPS URL, an exact hostname allowlist match,
+and a lowercase SHA-256 digest.
+
+Only a live worker lease can retrieve the registered source.
+Source URLs are not exposed by the public acquisition API.
+
+The registration method is internal. No source administration
+endpoint and no network download are enabled yet.
+
+Before fetching, the future network worker must also enforce:
+DNS/IP protections against SSRF and rebinding, no redirects,
+strict TLS verification, size/time limits, digest verification
+and a validated Gluetun kill switch.

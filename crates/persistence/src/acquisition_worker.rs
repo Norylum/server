@@ -87,9 +87,13 @@ impl Database {
 
             let id: Option<String> = tx
                 .query_row(
-                    "SELECT id FROM acquisition_requests
-                     WHERE status='approved'
-                     ORDER BY created_at ASC, id ASC
+                    "SELECT r.id FROM acquisition_requests r
+                     WHERE r.status='approved'
+                       AND EXISTS (
+                         SELECT 1 FROM acquisition_sources s
+                         WHERE s.request_id=r.id
+                       )
+                     ORDER BY r.created_at ASC, r.id ASC
                      LIMIT 1",
                     [],
                     |row| row.get(0),
@@ -277,6 +281,16 @@ mod tests {
             .await
             .unwrap();
 
+        db1.register_acquisition_source(
+            &account,
+            &request.id,
+            "https://cdn.example.org/fixture.mp4",
+            &"a".repeat(64),
+            &["cdn.example.org".to_owned()],
+        )
+        .await
+        .unwrap();
+
         let (a, b) = tokio::join!(
             db1.claim_next_approved_acquisition(),
             db2.claim_next_approved_acquisition()
@@ -368,6 +382,16 @@ mod attempt_limit_tests {
         db.approve_acquisition_request(&account, &request.id)
             .await
             .unwrap();
+
+        db.register_acquisition_source(
+            &account,
+            &request.id,
+            "https://cdn.example.org/retries.mp4",
+            &"b".repeat(64),
+            &["cdn.example.org".to_owned()],
+        )
+        .await
+        .unwrap();
 
         for expected_attempt in 1..=3 {
             let lease = db

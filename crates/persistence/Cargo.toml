@@ -10,6 +10,7 @@ norylum-foundation = { path = "../foundation" }
 norylum-library = { path = "../library" }
 norylum-metadata = { path = "../metadata" }
 rusqlite.workspace = true
+reqwest.workspace = true
 tokio.workspace = true
 chrono.workspace = true
 tracing.workspace = true
