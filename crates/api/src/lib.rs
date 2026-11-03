@@ -4,6 +4,7 @@
 
 mod auth_routes;
 mod device_routes;
+mod playback_sync_routes;
 
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
@@ -15,7 +16,7 @@ use norylum_catalog::{CatalogService, SeasonDetails, ShowDetails, ShowRecord};
 use norylum_devices::DeviceService;
 use norylum_foundation::{NorylumError, ShowId};
 use norylum_library::{MediaItem, MediaScanner};
-use norylum_playback::{PlaybackService, PlaybackState};
+use norylum_playback::PlaybackService;
 use norylum_profiles::ProfileService;
 use norylum_streaming::StreamingState;
 use serde::Serialize;
@@ -189,8 +190,9 @@ pub fn create_router(state: AppState) -> Router {
         authorizer: state.authorizer.clone(),
     };
 
-    let playback_state = PlaybackState {
+    let playback_sync_state = playback_sync_routes::PlaybackSyncState {
         playback: state.playback.clone(),
+        catalog: state.catalog.clone(),
         authorizer: state.authorizer.clone(),
     };
 
@@ -219,13 +221,25 @@ pub fn create_router(state: AppState) -> Router {
     let playback_routes = Router::new()
         .route(
             "/progress",
-            axum::routing::post(norylum_playback::update_progress_handler),
+            axum::routing::post(playback_sync_routes::legacy_update_handler),
+        )
+        .route(
+            "/sync",
+            axum::routing::get(playback_sync_routes::list_sync_handler),
+        )
+        .route(
+            "/sync/:media_id",
+            axum::routing::put(playback_sync_routes::sync_progress_handler),
+        )
+        .route(
+            "/continue-watching",
+            axum::routing::get(playback_sync_routes::continue_watching_handler),
         )
         .route(
             "/:media_id",
-            axum::routing::get(norylum_playback::get_progress_handler),
+            axum::routing::get(playback_sync_routes::legacy_get_handler),
         )
-        .with_state(playback_state);
+        .with_state(playback_sync_state);
 
     let protected = Router::new()
         .nest("/v1/library", library_routes)

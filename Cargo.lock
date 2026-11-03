@@ -554,6 +554,7 @@ dependencies = [
  "norylum-devices",
  "norylum-foundation",
  "norylum-library",
+ "norylum-persistence",
  "norylum-playback",
  "norylum-profiles",
  "norylum-streaming",

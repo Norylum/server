@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
+mod playback_sync;
+
 /// Modèle de données pour la persistance de la progression de lecture.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PlaybackProgressRecord {
@@ -23,6 +25,7 @@ pub struct PlaybackProgressRecord {
     pub duration_seconds: f64,
     pub is_completed: bool,
     pub updated_at: DateTime<Utc>,
+    pub revision: u64,
 }
 
 /// Modèle de données pour une série télévisée dans SQLite.
@@ -164,6 +167,31 @@ impl Database {
                 e
             ))
         })?;
+
+        // Playback Sync V1 : migration additive des revisions.
+        let has_revision = {
+            let mut statement = conn
+                .prepare("PRAGMA table_info(playback_progress)")
+                .map_err(|e| NorylumError::Internal(e.to_string()))?;
+
+            let rows = statement
+                .query_map([], |row| row.get::<_, String>(1))
+                .map_err(|e| NorylumError::Internal(e.to_string()))?;
+
+            let columns = rows
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| NorylumError::Internal(e.to_string()))?;
+
+            columns.iter().any(|name| name == "revision")
+        };
+
+        if !has_revision {
+            conn.execute_batch(
+                "ALTER TABLE playback_progress
+                 ADD COLUMN revision INTEGER NOT NULL DEFAULT 1;",
+            )
+            .map_err(|e| NorylumError::Internal(format!("Migration revision playback : {e}")))?;
+        }
 
         // 2. Migration additive : ajout de la colonne media_type à media_items si absente
         let has_media_type = {
@@ -982,6 +1010,8 @@ impl Database {
         position_seconds: f64,
         duration_seconds: f64,
     ) -> Result<PlaybackProgressRecord, NorylumError> {
+        playback_sync::validate_progress(position_seconds, duration_seconds)?;
+
         let is_completed = if duration_seconds > 0.0 {
             (position_seconds / duration_seconds) >= 0.90
         } else {
@@ -1000,7 +1030,8 @@ impl Database {
                 position_seconds = excluded.position_seconds,
                 duration_seconds = excluded.duration_seconds,
                 is_completed = excluded.is_completed,
-                updated_at = excluded.updated_at;",
+                updated_at = excluded.updated_at,
+                revision = playback_progress.revision + 1;",
             params![
                 account_id.as_str(),
                 profile_id.as_str(),
@@ -1013,6 +1044,17 @@ impl Database {
         )
         .map_err(|e| NorylumError::Internal(format!("Erreur lors de la sauvegarde de progression: {}", e)))?;
 
+        let revision: i64 = conn
+            .query_row(
+                "SELECT revision FROM playback_progress
+             WHERE account_id = ?1
+               AND profile_id = ?2
+               AND media_id = ?3",
+                params![account_id.as_str(), profile_id.as_str(), media_id.as_str(),],
+                |row| row.get(0),
+            )
+            .map_err(|e| NorylumError::Internal(e.to_string()))?;
+
         Ok(PlaybackProgressRecord {
             account_id: account_id.clone(),
             profile_id: profile_id.clone(),
@@ -1021,6 +1063,7 @@ impl Database {
             duration_seconds,
             is_completed,
             updated_at: now,
+            revision: u64::try_from(revision).map_err(|e| NorylumError::Internal(e.to_string()))?,
         })
     }
 
@@ -1034,7 +1077,8 @@ impl Database {
         let conn = self.conn.lock().await;
         let mut stmt = conn
             .prepare(
-                "SELECT position_seconds, duration_seconds, is_completed, updated_at
+                "SELECT position_seconds, duration_seconds, is_completed,
+                        updated_at, revision
                  FROM playback_progress
                  WHERE account_id = ?1 AND profile_id = ?2 AND media_id = ?3",
             )
@@ -1048,6 +1092,7 @@ impl Database {
                     let dur: f64 = row.get(1)?;
                     let comp: i32 = row.get(2)?;
                     let updated_str: String = row.get(3)?;
+                    let revision: i64 = row.get(4)?;
                     let dt = DateTime::parse_from_rfc3339(&updated_str)
                         .map(|d| d.with_timezone(&Utc))
                         .unwrap_or_else(|_| Utc::now());
@@ -1060,6 +1105,7 @@ impl Database {
                         duration_seconds: dur,
                         is_completed: comp != 0,
                         updated_at: dt,
+                        revision: u64::try_from(revision).unwrap_or(1),
                     })
                 },
             )
@@ -1077,7 +1123,8 @@ impl Database {
         let conn = self.conn.lock().await;
         let mut stmt = conn
             .prepare(
-                "SELECT media_id, position_seconds, duration_seconds, is_completed, updated_at
+                "SELECT media_id, position_seconds, duration_seconds,
+                        is_completed, updated_at, revision
                  FROM playback_progress
                  WHERE account_id = ?1 AND profile_id = ?2",
             )
@@ -1090,6 +1137,7 @@ impl Database {
                 let dur: f64 = row.get(2)?;
                 let comp: i32 = row.get(3)?;
                 let updated_str: String = row.get(4)?;
+                let revision: i64 = row.get(5)?;
                 let dt = DateTime::parse_from_rfc3339(&updated_str)
                     .map(|d| d.with_timezone(&Utc))
                     .unwrap_or_else(|_| Utc::now());
@@ -1102,6 +1150,7 @@ impl Database {
                     duration_seconds: dur,
                     is_completed: comp != 0,
                     updated_at: dt,
+                    revision: u64::try_from(revision).unwrap_or(1),
                 })
             })
             .map_err(|e| NorylumError::Internal(e.to_string()))?;

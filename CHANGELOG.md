@@ -18,6 +18,30 @@ Elles ne constituent pas des publications de versions stables.
 
 ## [Unreleased]
 
+### Playback Sync V1 — 2026-11-03
+
+**Added**
+- Revisions persistantes des progressions dans SQLite.
+- GET /v1/playback/sync.
+- PUT /v1/playback/sync/:media_id.
+- GET /v1/playback/continue-watching.
+- Gestion des conflits de revision avec HTTP 409.
+- Tests de reprise multi-appareils et de conflits.
+
+**Changed**
+- L'ancienne ecriture de progression incremente
+  maintenant la revision.
+- Migration additive des progressions existantes.
+
+**Security**
+- Filtrage des progressions selon le profil authentifie.
+- Controle parental avant lecture ou ecriture.
+- Validation des positions et durees non finies.
+
+---
+
+
+
 ### Devices V2 — 2026-11-03
 
 **Added**

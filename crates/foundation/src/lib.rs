@@ -161,6 +161,9 @@ pub enum NorylumError {
     #[error("Ressource non trouvée : {0}")]
     NotFound(String),
 
+    #[error("Conflit : {0}")]
+    Conflict(String),
+
     #[error("Erreur de validation : {0}")]
     Validation(String),
 
@@ -186,6 +189,7 @@ impl NorylumError {
             Self::Unauthorized(_) => StatusCode::UNAUTHORIZED,
             Self::Forbidden(_) | Self::DirectoryTraversal(_) => StatusCode::FORBIDDEN,
             Self::NotFound(_) => StatusCode::NOT_FOUND,
+            Self::Conflict(_) => StatusCode::CONFLICT,
             Self::Validation(_) => StatusCode::BAD_REQUEST,
             Self::RangeNotSatisfiable(_) => StatusCode::RANGE_NOT_SATISFIABLE,
             Self::FfprobeError(_) | Self::Internal(_) | Self::Io(_) => {
@@ -200,6 +204,7 @@ impl NorylumError {
             Self::Forbidden(_) => "FORBIDDEN",
             Self::DirectoryTraversal(_) => "DIRECTORY_TRAVERSAL",
             Self::NotFound(_) => "NOT_FOUND",
+            Self::Conflict(_) => "CONFLICT",
             Self::Validation(_) => "VALIDATION_ERROR",
             Self::RangeNotSatisfiable(_) => "RANGE_NOT_SATISFIABLE",
             Self::FfprobeError(_) => "FFPROBE_ERROR",

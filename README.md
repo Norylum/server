@@ -342,3 +342,57 @@ executer la maintenance si elles sont expirees.
 
 Le nettoyage ne modifie pas les autres comptes,
 les profils ou la progression de lecture.
+
+
+## Playback Sync V1 — Reprise entre appareils
+
+La progression appartient a un compte, un profil et un media.
+Tous les appareils connectes au meme profil consultent
+la meme progression dans SQLite.
+
+Routes :
+
+- `GET /v1/playback/sync` : progressions du profil.
+- `PUT /v1/playback/sync/:media_id` : ecriture conditionnelle.
+- `GET /v1/playback/continue-watching` : lectures en cours.
+- `GET /v1/playback/:media_id` : lecture unitaire existante.
+- `POST /v1/playback/progress` : ecriture historique.
+
+Exemple de mise a jour initiale :
+
+```json
+{
+  "position_seconds": 120.0,
+  "duration_seconds": 1200.0
+}
+```
+
+Si aucune progression n'existe, sa revision devient 1.
+Pour modifier une progression existante :
+
+```json
+{
+  "position_seconds": 300.0,
+  "duration_seconds": 1200.0,
+  "expected_revision": 1
+}
+```
+
+Le serveur renvoie une nouvelle revision, ici 2.
+En cas de revision obsolete, il retourne HTTP 409.
+Le client doit relire la progression avant de reessayer.
+
+L'ancien POST /v1/playback/progress reste compatible :
+il incremente la revision mais utilise le principe
+last-write-wins. Les nouveaux clients doivent utiliser
+l'ecriture conditionnelle pour eviter les conflits silencieux.
+
+Les medias non autorises au profil connecte sont exclus
+des listes et refuses en consultation ou en ecriture.
+Les lectures terminees (90 pour cent ou plus) ne figurent
+pas dans continue-watching, limite a 50 entrees.
+
+Les revisions sont migrees sans effacer les progressions
+existantes. La synchronisation concerne les appareils
+connectes au meme serveur Norylum, pas plusieurs serveurs
+independants.

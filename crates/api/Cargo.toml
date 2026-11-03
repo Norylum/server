@@ -14,6 +14,7 @@ norylum-library = { path = "../library" }
 norylum-catalog = { path = "../catalog" }
 norylum-streaming = { path = "../streaming" }
 norylum-playback = { path = "../playback" }
+norylum-persistence = { path = "../persistence" }
 axum.workspace = true
 tokio.workspace = true
 serde.workspace = true
