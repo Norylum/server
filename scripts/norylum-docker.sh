@@ -42,6 +42,12 @@ Norylum Docker
                                     Arreter le VPN sans arreter Norylum
   scripts/norylum-docker.sh acquisition-requests
                                     Lister les demandes authentifiees
+  scripts/norylum-docker.sh acquisition-run
+                                    Lancer un cycle d'acquisition sous VPN
+  scripts/norylum-docker.sh acquisition-logs
+                                    Afficher les journaux du dernier worker
+  scripts/norylum-docker.sh acquisition-status
+                                    Etat du service acquisition-worker
   scripts/norylum-docker.sh torrent-enable MEDIA_ID
                                     Activer explicitement un partage BitTorrent
   scripts/norylum-docker.sh torrent-disable MEDIA_ID
@@ -883,6 +889,42 @@ torrent_logs() {
   "${DC[@]}" --profile torrent logs --tail=100 seeder
 }
 
+acquisition_run() {
+  require_config
+  if ! [[ -d vpn-secrets ]]; then
+    echo "ERREUR : vpn-secrets absent — VPN non configure" >&2
+    exit 1
+  fi
+  local gluetun_cid
+  gluetun_cid="$("${DC[@]}" --profile acquisition ps -q gluetun 2>/dev/null)" || gluetun_cid=""
+  if [[ -z "$gluetun_cid" ]]; then
+    echo "ERREUR : Gluetun non demarre. Lancer vpn-connect ou vpn-start d'abord." >&2
+    exit 1
+  fi
+  local health
+  health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}unknown{{end}}' "$gluetun_cid" 2>/dev/null)" || health="unknown"
+  if [[ "$health" != "healthy" ]]; then
+    echo "ERREUR : Gluetun $health — attendre healthy avant de lancer une acquisition." >&2
+    exit 1
+  fi
+  echo "Lancement d'un cycle d'acquisition sous VPN..."
+  "${DC[@]}" --profile acquisition run --rm acquisition-worker
+}
+
+acquisition_logs() {
+  "${DC[@]}" --profile acquisition logs --tail=200 acquisition-worker 2>/dev/null || \
+    echo "INFO : aucun journal acquisition-worker disponible"
+}
+
+acquisition_status() {
+  echo "=== Demandes d'acquisition ==="
+  torrent_api GET /v1/acquisition/requests
+  echo ""
+  echo "=== Conteneur acquisition-worker ==="
+  "${DC[@]}" --profile acquisition ps acquisition-worker 2>/dev/null || \
+    echo "INFO : service acquisition-worker non demarre"
+}
+
 case "${1:-}" in
   setup) setup ;;
   start)
@@ -924,6 +966,9 @@ case "${1:-}" in
   vpn-status) vpn_status ;;
   vpn-stop) vpn_stop ;;
   acquisition-requests) torrent_api GET /v1/acquisition/requests ;;
+  acquisition-run) acquisition_run ;;
+  acquisition-logs) acquisition_logs ;;
+  acquisition-status) acquisition_status ;;
   torrent-enable) torrent_enable "${2:-}" ;;
   torrent-limit) torrent_limit "${2:-}" ;;
   torrent-disable) torrent_disable "${2:-}" ;;

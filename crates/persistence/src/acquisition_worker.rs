@@ -193,14 +193,12 @@ impl Database {
         .await
     }
 
-    /// Deliberately cannot mark a media as available.
-    /// Availability requires a separately validated ingestion.
     pub async fn finish_acquisition_claim(
         &self,
         lease: &AcquisitionLease,
         terminal_status: &str,
     ) -> Result<(), NorylumError> {
-        if !matches!(terminal_status, "failed" | "unavailable") {
+        if !matches!(terminal_status, "available" | "failed" | "unavailable") {
             return Err(NorylumError::Validation(
                 "Etat terminal du worker non autorise".into(),
             ));
@@ -336,7 +334,7 @@ mod tests {
             .is_err());
 
         assert!(db2
-            .finish_acquisition_claim(&second, "available")
+            .finish_acquisition_claim(&second, "invalid-status")
             .await
             .is_err());
 

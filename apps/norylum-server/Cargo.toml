@@ -22,6 +22,8 @@ norylum-api = { path = "../../crates/api" }
 norylum-persistence = { path = "../../crates/persistence" }
 norylum-metadata = { path = "../../crates/metadata" }
 norylum-torrent = { path = "../../crates/torrent" }
+norylum-acquisition-transport = { path = "../../crates/acquisition-transport" }
+reqwest.workspace = true
 librqbit = "=9.0.1"
 xmltree = "0.11"
 fs2 = "0.4"

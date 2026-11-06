@@ -101,6 +101,38 @@ services:
       - ./media:/data/media
 
 
+  acquisition-worker:
+    profiles:
+      - acquisition
+    network_mode: "service:gluetun"
+    image: norylum-server:local
+    depends_on:
+      gluetun:
+        condition: service_healthy
+      server:
+        condition: service_healthy
+    user: "${NORYLUM_UID:?Run setup}:${NORYLUM_GID:?Run setup}"
+    init: true
+    restart: "no"
+    stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    command:
+      - norylum-acquisition-worker
+      - --run
+    environment:
+      NORYLUM_MEDIA_DIR: /data/media
+      RUST_LOG: ${NORYLUM_RUST_LOG:-info}
+    volumes:
+      - ./media:/data/media
+
   vpn-probe:
     profiles:
       - vpn-test
