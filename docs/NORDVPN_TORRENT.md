@@ -145,13 +145,31 @@ Conclusion : comportement fail-closed confirme.
 Le pare-feu Gluetun bloque tout trafic non-VPN
 meme lorsque la connexion VPN ne s'est pas etablie.
 
-Limitation : ce test couvre le demarrage sans VPN.
-La coupure d'un tunnel actif en cours de session
-(drop apres connexion etablie) n'est pas encore testee.
-
 Pour relancer le test :
 
     scripts/norylum-docker.sh vpn-killswitch-test
+
+## Kill switch — tunnel actif — validation 2026-11-06
+
+Commande :
+
+    scripts/norylum-docker.sh vpn-killswitch-active-test
+
+Protocole execute :
+Gluetun demarre dans un conteneur isole avec les
+credentials NordVPN reels (montage vpn-secrets en
+lecture seule). Le test attend healthy, verifie la
+connectivite, envoie SIGKILL au processus OpenVPN
+(PID 50), puis lance immediatement un probe IPv4.
+
+Resultats observes :
+- Phase 1 : connectivite IPv4 etablie via VPN
+  (IP de sortie : 186.247.77.219).
+- Phase 2 : connexion IPv4 bloquee immediatement
+  apres SIGKILL sur OpenVPN.
+
+Conclusion : kill switch operationnel sur tunnel actif.
+Le trafic est bloque sans delai apres la coupure.
 
 ## Limitations NordVPN
 
@@ -213,8 +231,7 @@ separe. Le serveur headless gardera toute son API.
 ## Etat actuel
 
 Infrastructure de seeding implementee.
-Kill switch fail-closed valide par test isole (2026-11-06).
-Coupure de tunnel actif non encore testee.
+Kill switch valide : fail-closed et coupure tunnel actif (2026-11-06).
 Acquisition BitTorrent automatique non implementee.
 Ne pas annoncer le parcours complet comme termine.
 
@@ -253,7 +270,7 @@ revendiquee avant ces validations.
 | Fuite DNS par requete hors tunnel | Non exclue — DNS resolver 127.0.0.1 verifie structurellement, trafic non capture |
 | Contournement IPv6 (Teredo, 6to4) | Non exclu — firewall DROP verifie, mecanismes de tunnel non testes |
 | Kill switch au demarrage sans VPN | **Teste et confirme** (2026-11-06) |
-| Kill switch apres coupure tunnel actif | Non teste |
+| Kill switch apres coupure tunnel actif | **Teste et confirme** (2026-11-06) |
 | Logs VPN persistes sur hote | Limite par rotation (10 Mo, 3 fichiers) |
 | Seeder actif si Gluetun redémarre | Non possible — restart:no, depends_on:service_healthy |
 | Port BitTorrent expose sur hote | Absent — aucun port publie dans compose.yaml |

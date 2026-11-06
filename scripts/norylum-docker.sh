@@ -32,6 +32,8 @@ Norylum Docker
                                     Verifier le blocage IPv6 sortant
   scripts/norylum-docker.sh vpn-killswitch-test
                                     Tester le fail-closed dans un env isole
+  scripts/norylum-docker.sh vpn-killswitch-active-test
+                                    Tester le kill switch sur tunnel actif
   scripts/norylum-docker.sh vpn-start
                                     Demarrer Gluetun puis seeder
   scripts/norylum-docker.sh vpn-status
@@ -570,6 +572,148 @@ vpn_killswitch_test() {
   return "$result"
 }
 
+vpn_killswitch_active_test() {
+  # Tests that the kill switch fires when an active VPN tunnel drops.
+  # Uses real credentials in a fully isolated container; never touches
+  # the production Gluetun, the seeder, or any media data.
+
+  if [[ ! -f "$ROOT/vpn-secrets/openvpn_user" || \
+        ! -f "$ROOT/vpn-secrets/openvpn_password" ]]; then
+    echo "vpn-secrets manquants : test impossible" >&2
+    return 1
+  fi
+
+  if "${DC[@]}" --profile torrent ps --status running --services 2>/dev/null |
+      grep -qx seeder; then
+    echo "ERREUR : arreter le seeder avant le test" >&2
+    return 1
+  fi
+
+  local tmpdir gluetun_name result=0
+
+  tmpdir="$(mktemp -d)"
+  gluetun_name="norylum-gluetun-ks-active-$$"
+
+  echo "=== Test kill switch sur tunnel VPN actif (env isole) ==="
+  echo "Phase 1 : connexion NordVPN reelle, verification connectivite."
+  echo "Phase 2 : coupure OpenVPN, verification blocage immediat."
+  echo ""
+
+  mkdir -p "$tmpdir/state"
+  if [[ -f "$ROOT/vpn-state/servers.json" ]]; then
+    cp "$ROOT/vpn-state/servers.json" "$tmpdir/state/servers.json"
+  fi
+
+  if ! docker run -d \
+      --name "$gluetun_name" \
+      --cap-add NET_ADMIN \
+      --device /dev/net/tun \
+      --security-opt no-new-privileges:true \
+      -e VPN_SERVICE_PROVIDER=nordvpn \
+      -e VPN_TYPE=openvpn \
+      -e OPENVPN_PROTOCOL=udp \
+      -e SERVER_COUNTRIES=Netherlands \
+      -e VPN_PORT_FORWARDING=off \
+      -v "$ROOT/vpn-secrets:/run/secrets:ro" \
+      -v "$tmpdir/state:/gluetun" \
+      qmcgaw/gluetun:v3.41.3 >/dev/null; then
+    echo "ERREUR : impossible de demarrer le Gluetun de test" >&2
+    rm -rf "$tmpdir"
+    return 1
+  fi
+
+  echo "Attente connexion VPN (90s max)..."
+  local i h healthy=0
+  for ((i=0; i<45; i++)); do
+    h="$(docker inspect \
+      --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}unknown{{end}}' \
+      "$gluetun_name" 2>/dev/null)" || break
+    if [[ "$h" == "healthy" ]]; then
+      healthy=1
+      break
+    fi
+    sleep 2
+  done
+
+  if (( healthy == 0 )); then
+    echo "ERREUR : Gluetun de test non healthy apres 90s" >&2
+    docker logs --tail=20 "$gluetun_name" 2>&1 || true
+    docker rm -f "$gluetun_name" >/dev/null 2>&1 || true
+    rm -rf "$tmpdir"
+    return 1
+  fi
+
+  echo "OK : Gluetun de test healthy (tunnel VPN etabli)"
+
+  echo ""
+  echo "--- Phase 1 : connectivite avec VPN actif ---"
+  local vpn_ip
+  if vpn_ip="$(docker run --rm \
+      --network "container:$gluetun_name" \
+      --security-opt no-new-privileges:true \
+      norylum-server:local \
+      curl --ipv4 --noproxy '*' --fail --silent --show-error \
+        --max-time 15 https://api.ipify.org 2>/dev/null)"; then
+    echo "OK : connectivite IPv4 via VPN (IP : $vpn_ip)"
+  else
+    echo "ECHEC : probe sans connectivite malgre Gluetun healthy" >&2
+    docker rm -f "$gluetun_name" >/dev/null 2>&1 || true
+    rm -rf "$tmpdir"
+    return 1
+  fi
+
+  echo ""
+  echo "--- Phase 2 : coupure OpenVPN ---"
+  local ovpn_pid
+  ovpn_pid="$(docker exec "$gluetun_name" \
+    sh -c 'pgrep -x openvpn | head -1' 2>/dev/null)" || ovpn_pid=""
+
+  if [[ -z "$ovpn_pid" ]]; then
+    ovpn_pid="$(docker exec "$gluetun_name" \
+      sh -c 'ps aux 2>/dev/null | awk "/[o]penvpn/{print \$1}" | head -1')" \
+      || ovpn_pid=""
+  fi
+
+  if [[ -z "$ovpn_pid" ]]; then
+    echo "ERREUR : PID OpenVPN introuvable dans le conteneur de test" >&2
+    docker rm -f "$gluetun_name" >/dev/null 2>&1 || true
+    rm -rf "$tmpdir"
+    return 1
+  fi
+
+  echo "PID OpenVPN : $ovpn_pid — envoi SIGKILL..."
+  docker exec "$gluetun_name" kill -9 "$ovpn_pid" 2>/dev/null || true
+
+  echo "Test de connectivite immediat apres coupure..."
+  if docker run --rm \
+      --network "container:$gluetun_name" \
+      --security-opt no-new-privileges:true \
+      norylum-server:local \
+      curl --ipv4 --noproxy '*' --fail --silent --show-error \
+        --max-time 10 https://api.ipify.org 2>/dev/null; then
+    echo "ECHEC : connexion IPv4 etablie apres coupure — kill switch inoperant" >&2
+    result=1
+  else
+    echo "OK : connexion IPv4 bloquee apres coupure OpenVPN"
+  fi
+
+  echo ""
+  echo "--- Nettoyage ---"
+  docker rm -f "$gluetun_name" >/dev/null 2>&1 || true
+  rm -rf "$tmpdir"
+  echo "Conteneur de test supprime."
+
+  echo ""
+  if (( result == 0 )); then
+    echo "=== RESULTAT : kill switch operationnel sur tunnel actif ==="
+    echo "Le trafic est bloque immediatement apres la coupure OpenVPN."
+  else
+    echo "=== RESULTAT : ECHEC ===" >&2
+  fi
+
+  return "$result"
+}
+
 vpn_start() {
   # Arreter l'ancien seeder avant toute operation Gluetun.
   "${DC[@]}" --profile torrent stop seeder \
@@ -753,6 +897,7 @@ case "${1:-}" in
   vpn-firewall-check) vpn_firewall_check ;;
   vpn-ipv6-check) vpn_ipv6_check ;;
   vpn-killswitch-test) vpn_killswitch_test ;;
+  vpn-killswitch-active-test) vpn_killswitch_active_test ;;
   vpn-start) vpn_start ;;
   vpn-status) vpn_status ;;
   vpn-stop) vpn_stop ;;
