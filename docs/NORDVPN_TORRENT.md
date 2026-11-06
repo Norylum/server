@@ -121,22 +121,37 @@ mecanismes (tunnel 6to4, Teredo).
 Le statut healthy et une IP differente de l'hote
 ne constituent pas une certification anti-fuite.
 
-## Kill switch — protocole de test (non encore execute)
+## Kill switch — validation 2026-11-06
 
-Le test doit utiliser un conteneur Gluetun isole,
-distinct du tunnel de production.
+Commande :
 
-Protocole propose :
-1. Demarrer Gluetun en profil vpn-test avec secrets
-   factices produisant un echec de connexion controle.
-2. Lancer vpn-probe sur ce Gluetun de test.
-3. Verifier que vpn-probe n'a aucune connectivite
-   (kill switch actif des que le VPN n'est pas etabli).
-4. Verifier l'absence de sortie par eth0.
-5. Verifier l'absence de contournement IPv6.
+    scripts/norylum-docker.sh vpn-killswitch-test
 
-Ce test n'a pas encore ete execute.
-Autorisation explicite requise avant tout lancement.
+Protocole execute :
+Gluetun demarre dans un conteneur isole avec des
+identifiants volontairement invalides (AUTH_FAILED).
+Le VPN ne s'etablit pas. Les regles iptables sont
+appliquees au demarrage, avant toute connexion VPN.
+
+Resultats observes :
+- Chain OUTPUT : policy DROP (confirme par iptables -L)
+- Regles acceptees : loopback, RELATED/ESTABLISHED,
+  subnet Docker, UDP vers le serveur OpenVPN (port 1194),
+  trafic via tun0 (interface VPN, non etablie).
+- Connexion IPv4 sortante : bloquee.
+- Connexion IPv6 sortante : bloquee.
+
+Conclusion : comportement fail-closed confirme.
+Le pare-feu Gluetun bloque tout trafic non-VPN
+meme lorsque la connexion VPN ne s'est pas etablie.
+
+Limitation : ce test couvre le demarrage sans VPN.
+La coupure d'un tunnel actif en cours de session
+(drop apres connexion etablie) n'est pas encore testee.
+
+Pour relancer le test :
+
+    scripts/norylum-docker.sh vpn-killswitch-test
 
 ## Limitations NordVPN
 
@@ -198,7 +213,8 @@ separe. Le serveur headless gardera toute son API.
 ## Etat actuel
 
 Infrastructure de seeding implementee.
-Kill switch non valide par test actif.
+Kill switch fail-closed valide par test isole (2026-11-06).
+Coupure de tunnel actif non encore testee.
 Acquisition BitTorrent automatique non implementee.
 Ne pas annoncer le parcours complet comme termine.
 
@@ -236,7 +252,8 @@ revendiquee avant ces validations.
 |---|---|
 | Fuite DNS par requete hors tunnel | Non exclue — DNS resolver 127.0.0.1 verifie structurellement, trafic non capture |
 | Contournement IPv6 (Teredo, 6to4) | Non exclu — firewall DROP verifie, mecanismes de tunnel non testes |
-| Kill switch sous coupure reelle | Non teste — protocole defini, non execute |
+| Kill switch au demarrage sans VPN | **Teste et confirme** (2026-11-06) |
+| Kill switch apres coupure tunnel actif | Non teste |
 | Logs VPN persistes sur hote | Limite par rotation (10 Mo, 3 fichiers) |
 | Seeder actif si Gluetun redémarre | Non possible — restart:no, depends_on:service_healthy |
 | Port BitTorrent expose sur hote | Absent — aucun port publie dans compose.yaml |

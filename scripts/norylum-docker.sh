@@ -30,6 +30,8 @@ Norylum Docker
                                     Afficher les regles iptables Gluetun
   scripts/norylum-docker.sh vpn-ipv6-check
                                     Verifier le blocage IPv6 sortant
+  scripts/norylum-docker.sh vpn-killswitch-test
+                                    Tester le fail-closed dans un env isole
   scripts/norylum-docker.sh vpn-start
                                     Demarrer Gluetun puis seeder
   scripts/norylum-docker.sh vpn-status
@@ -454,6 +456,120 @@ vpn_ipv6_check() {
   fi
 }
 
+vpn_killswitch_test() {
+  # Isolated kill switch test: start a Gluetun container with deliberately
+  # invalid VPN credentials. Gluetun applies its firewall DROP rules at
+  # startup, before the VPN connection is established. This proves
+  # fail-closed behavior: no traffic escapes when the VPN is not up.
+  #
+  # This test never touches the production Gluetun or any media data.
+
+  if "${DC[@]}" --profile torrent ps --status running --services 2>/dev/null |
+      grep -qx seeder; then
+    echo "ERREUR : arreter le seeder avant le test kill switch" >&2
+    return 1
+  fi
+
+  local tmpdir gluetun_name result=0
+
+  tmpdir="$(mktemp -d)"
+  gluetun_name="norylum-gluetun-ks-$$"
+
+  echo "=== Test kill switch VPN (environnement isole) ==="
+  echo "Gluetun demarre avec des identifiants invalides."
+  echo "Le VPN ne s'etablira pas — le pare-feu doit rester en DROP."
+  echo ""
+
+  # Fake credentials — authentication will fail (intentional).
+  printf '%s' "norylum-ks-invalid-user"     > "$tmpdir/openvpn_user"
+  printf '%s' "norylum-ks-invalid-password" > "$tmpdir/openvpn_password"
+  chmod 600 "$tmpdir/openvpn_user" "$tmpdir/openvpn_password"
+
+  # Reuse cached server list so Gluetun does not try to download it
+  # through its own firewall DROP rules.
+  mkdir -p "$tmpdir/state"
+  if [[ -f "$ROOT/vpn-state/servers.json" ]]; then
+    cp "$ROOT/vpn-state/servers.json" "$tmpdir/state/servers.json"
+  fi
+
+  if ! docker run -d \
+      --name "$gluetun_name" \
+      --cap-add NET_ADMIN \
+      --device /dev/net/tun \
+      --security-opt no-new-privileges:true \
+      -e VPN_SERVICE_PROVIDER=nordvpn \
+      -e VPN_TYPE=openvpn \
+      -e OPENVPN_PROTOCOL=udp \
+      -e SERVER_COUNTRIES=Netherlands \
+      -e VPN_PORT_FORWARDING=off \
+      -v "$tmpdir:/run/secrets:ro" \
+      -v "$tmpdir/state:/gluetun" \
+      qmcgaw/gluetun:v3.41.3 >/dev/null; then
+    echo "ERREUR : impossible de demarrer le conteneur Gluetun de test" >&2
+    rm -rf "$tmpdir"
+    return 1
+  fi
+
+  echo "Attente de l'initialisation Gluetun (15s)..."
+  sleep 15
+
+  echo ""
+  echo "--- Journaux Gluetun de test ---"
+  docker logs --tail=15 "$gluetun_name" 2>&1 || true
+
+  echo ""
+  echo "--- Regles iptables OUTPUT dans le conteneur de test ---"
+  docker exec "$gluetun_name" iptables -L OUTPUT -n -v 2>/dev/null || \
+    echo "(iptables non disponible dans le conteneur)"
+
+  echo ""
+  echo "--- Test connectivite IPv4 (attendu : echec) ---"
+  if docker run --rm \
+      --network "container:$gluetun_name" \
+      --security-opt no-new-privileges:true \
+      norylum-server:local \
+      curl --ipv4 --noproxy '*' --fail --silent --show-error \
+        --max-time 10 https://api.ipify.org 2>/dev/null; then
+    echo "ECHEC : connexion IPv4 etablie — kill switch inoperant" >&2
+    result=1
+  else
+    echo "OK : connexion IPv4 bloquee (kill switch actif)"
+  fi
+
+  echo ""
+  echo "--- Test connectivite IPv6 (attendu : echec) ---"
+  if docker run --rm \
+      --network "container:$gluetun_name" \
+      --security-opt no-new-privileges:true \
+      norylum-server:local \
+      curl --ipv6 --noproxy '*' --fail --silent --show-error \
+        --max-time 10 https://ipv6.icanhazip.com 2>/dev/null; then
+    echo "ECHEC : connexion IPv6 etablie — fuite potentielle" >&2
+    result=1
+  else
+    echo "OK : connexion IPv6 bloquee"
+  fi
+
+  echo ""
+  echo "--- Nettoyage ---"
+  docker rm -f "$gluetun_name" >/dev/null 2>&1 || true
+  rm -rf "$tmpdir"
+  echo "Conteneur de test supprime."
+
+  echo ""
+  if (( result == 0 )); then
+    echo "=== RESULTAT : fail-closed confirme ==="
+    echo "Le pare-feu Gluetun bloque tout le trafic quand le VPN n'est pas etabli."
+    echo ""
+    echo "Limitation : ce test verifie l'absence de connexion au demarrage."
+    echo "La coupure d'un tunnel actif (drop en cours de session) n'est pas couverte."
+  else
+    echo "=== RESULTAT : ECHEC — verifier la configuration Gluetun ===" >&2
+  fi
+
+  return "$result"
+}
+
 vpn_start() {
   # Arreter l'ancien seeder avant toute operation Gluetun.
   "${DC[@]}" --profile torrent stop seeder \
@@ -636,6 +752,7 @@ case "${1:-}" in
   vpn-dns-check) vpn_dns_check ;;
   vpn-firewall-check) vpn_firewall_check ;;
   vpn-ipv6-check) vpn_ipv6_check ;;
+  vpn-killswitch-test) vpn_killswitch_test ;;
   vpn-start) vpn_start ;;
   vpn-status) vpn_status ;;
   vpn-stop) vpn_stop ;;
