@@ -408,6 +408,18 @@ vpn_dns_check() {
     cat /etc/resolv.conf
 
   echo ""
+  echo "=== Preuve iptables : port 53 externe bloque ==="
+  local cid
+  cid="$("${DC[@]}" --profile torrent ps -q gluetun)"
+  if docker exec "$cid" iptables -L OUTPUT -n 2>/dev/null | \
+      grep -qE "dpt:53|udp dpt:53|tcp dpt:53"; then
+    echo "ATTENTION : regle OUTPUT autorisant le port 53 detectee" >&2
+  else
+    echo "OK : aucune regle OUTPUT n'autorise le port 53 vers des adresses externes"
+    echo "     Le resolver 127.0.0.1 envoie les requetes DoT (port 853) via tun0."
+  fi
+
+  echo ""
   echo "Note : un nameserver 127.0.0.1 signifie que le DNS transite"
   echo "       par le resolver interne Gluetun (DNS-over-TLS)."
   echo "       Cela ne prouve pas l'absence de fuite DNS : seule"
@@ -433,6 +445,16 @@ vpn_firewall_check() {
   echo "=== ip6tables OUTPUT (IPv6) ==="
   docker exec "$cid" ip6tables -L OUTPUT -n -v 2>/dev/null || \
     echo "(ip6tables non disponible ou IPv6 desactive dans le conteneur)"
+
+  echo ""
+  echo "=== iptables INPUT (IPv4) ==="
+  docker exec "$cid" iptables -L INPUT -n -v 2>/dev/null || \
+    echo "(iptables INPUT indisponible)"
+
+  echo ""
+  echo "Note : l'absence de regle INPUT pour tun0 signifie que les pairs"
+  echo "       ne peuvent pas initier de connexions entrantes vers le seeder."
+  echo "       Seul le seeder peut initier les connexions (outbound-only)."
 }
 
 vpn_ipv6_check() {

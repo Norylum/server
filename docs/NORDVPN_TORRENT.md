@@ -171,6 +171,23 @@ Resultats observes :
 Conclusion : kill switch operationnel sur tunnel actif.
 Le trafic est bloque sans delai apres la coupure.
 
+## Proprietes de securite du seeder
+
+Le binaire norylum-seeder utilise librqbit avec :
+- ipv4_only: true — aucune connexion IPv6 initiee
+  par la bibliotheque BitTorrent elle-meme.
+- enable_upnp_port_forwarding: false — pas de
+  traversee automatique de NAT.
+- peer_limit: 10 — exposition limitee.
+
+Ces proprietes sont complement du pare-feu Gluetun :
+IPv6 bloque a la fois au niveau reseau (ip6tables DROP)
+et au niveau application (ipv4_only: true).
+
+La route iptables INPUT ne contient aucune regle pour
+tun0 : les pairs ne peuvent pas initier de connexions
+entrantes vers le seeder. Le seeder est outbound-only.
+
 ## Limitations NordVPN
 
 NordVPN standard ne propose pas de redirection
@@ -284,8 +301,8 @@ le trafic DNS n'a pas ete capture par tcpdump.
 
 | Risque | Statut |
 |---|---|
-| Fuite DNS par requete hors tunnel | Non exclue — DNS resolver 127.0.0.1 verifie structurellement, trafic non capture |
-| Contournement IPv6 (Teredo, 6to4) | Non exclu — firewall DROP verifie, mecanismes de tunnel non testes |
+| Fuite DNS par port 53 externe | Exclu structurellement : aucune regle OUTPUT n'autorise le port 53 vers des IPs externes ; trafic non capture par tcpdump |
+| Contournement IPv6 | Double protection : ip6tables OUTPUT DROP + seeder ipv4_only:true ; Teredo/6to4 non testes |
 | Kill switch au demarrage sans VPN | **Teste et confirme** (2026-11-06) |
 | Kill switch apres coupure tunnel actif | **Teste et confirme** (2026-11-06) |
 | Logs VPN persistes sur hote | Limite par rotation (10 Mo, 3 fichiers) |

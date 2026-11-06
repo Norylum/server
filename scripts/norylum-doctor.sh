@@ -46,4 +46,36 @@ if curl -fsS --max-time 3 "http://127.0.0.1:${port}/health" >/dev/null; then
 else
   echo "INFO: serveur non joignable sur 127.0.0.1:${port}"
 fi
+
+if [[ -d vpn-secrets ]]; then
+  if python3 scripts/vpn_config.py 2>/dev/null; then
+    echo 'OK: configuration VPN locale valide'
+  else
+    echo 'ATTENTION: configuration VPN locale invalide ou incomplete'
+  fi
+
+  gluetun_cid="$("${DC[@]}" --profile torrent ps -q gluetun 2>/dev/null)" || gluetun_cid=""
+  if [[ -n "$gluetun_cid" ]]; then
+    gluetun_health="$(docker inspect \
+      --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}unknown{{end}}' \
+      "$gluetun_cid" 2>/dev/null)" || gluetun_health="unknown"
+    if [[ "$gluetun_health" == "healthy" ]]; then
+      echo "OK: Gluetun $gluetun_health"
+    else
+      echo "ATTENTION: Gluetun $gluetun_health"
+    fi
+  else
+    echo 'INFO: Gluetun non demarre (profil torrent inactif)'
+  fi
+
+  if "${DC[@]}" --profile torrent ps --status running --services 2>/dev/null |
+      grep -qx seeder; then
+    echo 'INFO: seeder actif — verifier torrent-status'
+  else
+    echo 'INFO: seeder arrete'
+  fi
+else
+  echo 'INFO: vpn-secrets absent — VPN non configure'
+fi
+
 "${DC[@]}" ps
