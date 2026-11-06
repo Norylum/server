@@ -31,7 +31,7 @@ Configuration locale .env :
 
     NORYLUM_VPN_PROVIDER=nordvpn
     NORYLUM_VPN_TYPE=openvpn
-    NORYLUM_VPN_COUNTRIES=France
+    NORYLUM_VPN_COUNTRIES=Netherlands
 
 Ne jamais publier les identifiants ni le fichier .env.
 
@@ -46,10 +46,13 @@ Demarrer le tunnel sans seeding :
 
     scripts/norylum-docker.sh vpn-connect
 
-Verifier la sortie reseau :
+Verifier la sortie reseau et le confinement :
 
     scripts/norylum-docker.sh vpn-status
     scripts/norylum-docker.sh vpn-egress-check
+    scripts/norylum-docker.sh vpn-dns-check
+    scripts/norylum-docker.sh vpn-firewall-check
+    scripts/norylum-docker.sh vpn-ipv6-check
 
 Arreter les services dependants du VPN :
 
@@ -64,6 +67,47 @@ vpn-start peut reprendre les partages deja actives en SQLite.
 Verifier torrent-status avant cette commande.
 torrent-enable demande une confirmation explicite.
 
+## Diagnostic du confinement reseau
+
+### vpn-egress-check
+
+Compare l'IP publique de l'hote avec celle obtenue
+depuis le conteneur vpn-probe.
+Prouve : IP de sortie differente de celle de l'hote.
+Ne prouve pas : absence de fuite DNS ou IPv6.
+
+### vpn-dns-check
+
+Affiche /etc/resolv.conf dans Gluetun et dans le
+conteneur probe.
+Un nameserver 127.0.0.1 signifie que le DNS passe
+par le resolver DNS-over-TLS interne de Gluetun.
+Ne prouve pas l'absence de fuite DNS : seule une
+capture reseau sur tun0 peut l'exclure.
+
+Commande de reference (dans le conteneur Gluetun) :
+
+    docker exec <cid> cat /etc/resolv.conf
+
+### vpn-firewall-check
+
+Affiche les regles iptables et ip6tables OUTPUT
+du conteneur Gluetun.
+Prouve : politique DROP configuree statiquement.
+Ne prouve pas : absence de contournement dynamique.
+
+Commandes de reference :
+
+    docker exec <cid> iptables -L OUTPUT -n -v
+    docker exec <cid> ip6tables -L OUTPUT -n -v
+
+### vpn-ipv6-check
+
+Tente une connexion IPv6 sortante depuis vpn-probe.
+Un echec confirme le blocage IPv6 au niveau firewall.
+Ne prouve pas l'absence de fuite IPv6 par d'autres
+mecanismes (tunnel 6to4, Teredo).
+
 ## Validations de securite obligatoires
 
 - Verifier les IP de sortie et les routes.
@@ -77,9 +121,53 @@ torrent-enable demande une confirmation explicite.
 Le statut healthy et une IP differente de l'hote
 ne constituent pas une certification anti-fuite.
 
+## Kill switch — protocole de test (non encore execute)
+
+Le test doit utiliser un conteneur Gluetun isole,
+distinct du tunnel de production.
+
+Protocole propose :
+1. Demarrer Gluetun en profil vpn-test avec secrets
+   factices produisant un echec de connexion controle.
+2. Lancer vpn-probe sur ce Gluetun de test.
+3. Verifier que vpn-probe n'a aucune connectivite
+   (kill switch actif des que le VPN n'est pas etabli).
+4. Verifier l'absence de sortie par eth0.
+5. Verifier l'absence de contournement IPv6.
+
+Ce test n'a pas encore ete execute.
+Autorisation explicite requise avant tout lancement.
+
+## Limitations NordVPN
+
 NordVPN standard ne propose pas de redirection
 de port entrante. Certains pairs ne pourront donc
 pas se connecter directement au seeder.
+
+Le seeder sera visible uniquement des pairs qui
+initient la connexion. Le swarm de partage sera
+reduit par rapport a un seeder avec port forwarding.
+
+Certains serveurs NordVPN peuvent etre satures ou
+bloques selon le contenu. Changer de pays ou de
+serveur peut ameliorer la connectivite.
+
+## Procedure de retour arriere
+
+Pour revenir a un etat sans VPN ni seeder :
+
+    scripts/norylum-docker.sh vpn-stop
+
+Le serveur Norylum continue a fonctionner.
+La base SQLite n'est pas affectee.
+
+Pour retablir le VPN :
+
+    scripts/norylum-docker.sh vpn-connect
+
+Pour retablir le VPN et le seeder :
+
+    scripts/norylum-docker.sh vpn-start
 
 ## Acquisition future
 
@@ -110,7 +198,7 @@ separe. Le serveur headless gardera toute son API.
 ## Etat actuel
 
 Infrastructure de seeding implementee.
-NordVPN reel, DNS, IPv6 et kill switch non valides.
+Kill switch non valide par test actif.
 Acquisition BitTorrent automatique non implementee.
 Ne pas annoncer le parcours complet comme termine.
 
@@ -141,3 +229,15 @@ Validations restantes :
 
 Aucune certification anti-fuite complete n'est
 revendiquee avant ces validations.
+
+## Risques residuels
+
+| Risque | Statut |
+|---|---|
+| Fuite DNS par requete hors tunnel | Non exclue — DNS resolver 127.0.0.1 verifie structurellement, trafic non capture |
+| Contournement IPv6 (Teredo, 6to4) | Non exclu — firewall DROP verifie, mecanismes de tunnel non testes |
+| Kill switch sous coupure reelle | Non teste — protocole defini, non execute |
+| Logs VPN persistes sur hote | Limite par rotation (10 Mo, 3 fichiers) |
+| Seeder actif si Gluetun redémarre | Non possible — restart:no, depends_on:service_healthy |
+| Port BitTorrent expose sur hote | Absent — aucun port publie dans compose.yaml |
+| Seeder demarrant sans VPN verifie | Bloque — vpn_egress_check requis avant up seeder |

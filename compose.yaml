@@ -47,6 +47,12 @@ services:
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped
+    # Logs contain IPs and network activity; cap rotation to limit host disk use.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       VPN_SERVICE_PROVIDER: ${NORYLUM_VPN_PROVIDER:-protonvpn}
       VPN_TYPE: ${NORYLUM_VPN_TYPE:-wireguard}
@@ -54,6 +60,11 @@ services:
       SERVER_COUNTRIES: ${NORYLUM_VPN_COUNTRIES:-}
       SERVER_REGIONS: ${NORYLUM_VPN_REGIONS:-}
       VPN_PORT_FORWARDING: "off"
+      # Gluetun defaults: DNS-over-TLS on 127.0.0.1, IPv6 firewall DROP,
+      # all outbound traffic blocked unless it exits via the VPN tunnel.
+      # These defaults are intentionally left implicit; document them here
+      # so the security posture is explicit without overriding Gluetun's
+      # version-specific safe defaults.
     volumes:
       - ./vpn-secrets:/run/secrets:ro
       - ./vpn-state:/gluetun
@@ -76,6 +87,11 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     command:
       - norylum-seeder
     environment:

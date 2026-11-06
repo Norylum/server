@@ -24,6 +24,12 @@ Norylum Docker
                                     Connecter Gluetun seul
   scripts/norylum-docker.sh vpn-egress-check
                                     Verifier la sortie Internet VPN
+  scripts/norylum-docker.sh vpn-dns-check
+                                    Verifier le resolver DNS du tunnel
+  scripts/norylum-docker.sh vpn-firewall-check
+                                    Afficher les regles iptables Gluetun
+  scripts/norylum-docker.sh vpn-ipv6-check
+                                    Verifier le blocage IPv6 sortant
   scripts/norylum-docker.sh vpn-start
                                     Demarrer Gluetun puis seeder
   scripts/norylum-docker.sh vpn-status
@@ -379,6 +385,75 @@ vpn_egress_check() {
   echo "Attention : le test du kill switch reste a effectuer"
 }
 
+vpn_dns_check() {
+  if ! vpn_status >/dev/null; then
+    echo "VPN non healthy : test refuse" >&2
+    return 1
+  fi
+
+  local cid
+  cid="$("${DC[@]}" --profile torrent ps -q gluetun)"
+
+  echo "=== DNS depuis Gluetun (/etc/resolv.conf) ==="
+  docker exec "$cid" cat /etc/resolv.conf
+
+  echo ""
+  echo "=== DNS depuis le conteneur reseau VPN (probe) ==="
+  "${DC[@]}" --profile torrent --profile vpn-test \
+    run --rm --no-deps vpn-probe \
+    cat /etc/resolv.conf
+
+  echo ""
+  echo "Note : un nameserver 127.0.0.1 signifie que le DNS transite"
+  echo "       par le resolver interne Gluetun (DNS-over-TLS)."
+  echo "       Cela ne prouve pas l'absence de fuite DNS : seule"
+  echo "       une capture reseau (tcpdump sur tun0) peut l'exclure."
+}
+
+vpn_firewall_check() {
+  if ! vpn_status >/dev/null; then
+    echo "VPN non healthy : test refuse" >&2
+    return 1
+  fi
+
+  local cid
+  cid="$("${DC[@]}" --profile torrent ps -q gluetun)"
+
+  echo "=== iptables OUTPUT (IPv4) ==="
+  docker exec "$cid" iptables -L OUTPUT -n -v || {
+    echo "iptables indisponible dans le conteneur" >&2
+    return 1
+  }
+
+  echo ""
+  echo "=== ip6tables OUTPUT (IPv6) ==="
+  docker exec "$cid" ip6tables -L OUTPUT -n -v 2>/dev/null || \
+    echo "(ip6tables non disponible ou IPv6 desactive dans le conteneur)"
+}
+
+vpn_ipv6_check() {
+  if ! vpn_status >/dev/null; then
+    echo "VPN non healthy : test refuse" >&2
+    return 1
+  fi
+
+  local output
+  if output="$("${DC[@]}" --profile torrent --profile vpn-test \
+      run --rm --no-deps vpn-probe \
+      curl --ipv6 --noproxy '*' \
+        --fail --silent --show-error \
+        --max-time 10 \
+        https://ipv6.icanhazip.com 2>&1)"; then
+    echo "ATTENTION : adresse IPv6 publique obtenue : $output" >&2
+    echo "ATTENTION : sortie IPv6 possible — verifier la configuration Gluetun" >&2
+    return 1
+  else
+    echo "OK : connexion IPv6 sortante bloquee (echec attendu)"
+    echo "Note : absence de sortie IPv6 prouvee par echec de connexion,"
+    echo "       pas par inspection du trafic reseau."
+  fi
+}
+
 vpn_start() {
   # Arreter l'ancien seeder avant toute operation Gluetun.
   "${DC[@]}" --profile torrent stop seeder \
@@ -558,6 +633,9 @@ case "${1:-}" in
   jobs) api_call /v1/library/ingest/jobs ;;
   vpn-connect) vpn_connect ;;
   vpn-egress-check) vpn_egress_check ;;
+  vpn-dns-check) vpn_dns_check ;;
+  vpn-firewall-check) vpn_firewall_check ;;
+  vpn-ipv6-check) vpn_ipv6_check ;;
   vpn-start) vpn_start ;;
   vpn-status) vpn_status ;;
   vpn-stop) vpn_stop ;;
