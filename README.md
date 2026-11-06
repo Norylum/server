@@ -43,8 +43,9 @@ Norylum Server utilise un monolithe modulaire Rust.
 ```text
 server/
 ├── apps/
-│   └── norylum-server/
+│   └── norylum-server/        (server, seeder, metadata-tags, torrent-cleanup)
 ├── crates/
+│   ├── acquisition-transport/ (worker queue, source registry)
 │   ├── api/
 │   ├── auth/
 │   ├── authorization/
@@ -58,7 +59,8 @@ server/
 │   ├── playback/
 │   ├── profiles/
 │   ├── runtime/
-│   └── streaming/
+│   ├── streaming/
+│   └── torrent/               (librqbit integration, snapshot, seeding lifecycle)
 └── shared/
     ├── api-types/
     └── test-support/
@@ -68,34 +70,33 @@ Les modules sont organisés par responsabilité afin de faciliter la maintenance
 
 ## ✅ Fonctionnalités implémentées
 
-- Scan des bibliothèques multimédias.
-- Indexation des films et séries.
-- Organisation des saisons et épisodes.
-- Analyse des noms de fichiers.
-- Extraction des métadonnées techniques.
+- Scan et indexation des bibliothèques multimédias (films et séries).
+- Organisation des saisons et épisodes ; analyse des noms de fichiers.
+- Extraction des métadonnées techniques ; identifiants de médias stables.
 - Stockage SQLite avec mode WAL.
-- Identifiants de médias stables.
-- Streaming Direct Play.
-- Support HTTP 200 et 206 Partial Content.
-- Sauvegarde de la progression de lecture.
-- Contrôles d'autorisation initiaux.
-- Tests unitaires et d'intégration.
+- Authentification Argon2id, sessions Bearer, comptes et profils multi-utilisateurs.
+- Codes PIN par profil, appareils et sessions avec cycle de vie complet.
+- Streaming Direct Play, HTTP 200 et 206 Partial Content.
+- Synchronisation de la progression de lecture entre appareils (avec idempotence).
+- Métadonnées enrichies via TMDB (synopsis, affiches, associations manuelles).
+- Écriture des tags MKV/MP4 (`norylum-metadata-tags`).
+- Ingestion automatique et manuelle avec validation ffprobe.
+- Déploiement Docker avec sauvegarde SQLite, rotation des logs.
+- Moteur BitTorrent opt-in avec librqbit (`norylum-seeder`), snapshots SHA-256, nettoyage explicite.
+- VPN Gluetun (NordVPN/ProtonVPN/Mullvad…), isolation réseau, kill switch validé.
+- Diagnostics VPN : DNS, pare-feu, IPv6, kill switch fail-closed et tunnel actif.
+- Worker d'acquisition avec réservations atomiques et sources de confiance vérifiées.
+- Tests unitaires et d'intégration ; test E2E cycle de vie torrent (isolé).
 
 ## 🚧 Développement en cours
 
-Les prochaines étapes concernent notamment :
+- Transcodage et streaming adaptatif (GPU : QSV, NVENC, VAAPI, VideoToolbox).
+- Frontend Web (conteneur séparé, optionnel).
+- Worker d'acquisition réseau : indexeur, validation de source, téléchargement via VPN.
+- Codes PIN individuels pour profils enfants.
+- Cache local des affiches TMDB.
 
-- Authentification réelle des utilisateurs.
-- Comptes et profils.
-- Gestion des appareils.
-- Métadonnées enrichies et affiches.
-- Reprise de lecture entre appareils.
-- Transcodage et streaming adaptatif.
-- Sécurisation et déploiement en production.
-
-Les modules présents dans le workspace ne sont pas tous entièrement implémentés.
-
-**Attention :** les en-têtes d'identité utilisés actuellement ne constituent pas une authentification sécurisée. Le serveur ne doit pas être exposé publiquement dans cet état.
+Les modules présents dans le workspace ne sont pas tous entièrement implémentés. Ne pas exposer le serveur publiquement sans reverse proxy HTTPS.
 
 ## 🚀 Développement local
 

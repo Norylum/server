@@ -18,6 +18,23 @@ Elles ne constituent pas des publications de versions stables.
 
 ## [Unreleased]
 
+### VPN V1 — Réseau, confinement et kill switch
+
+- Ajout des commandes de diagnostic réseau : `vpn-dns-check`, `vpn-firewall-check`, `vpn-ipv6-check`.
+- Validation structurelle de l'absence de fuite DNS : aucune règle iptables OUTPUT n'autorise le port 53 vers des IPs externes ; trafic non capturé par tcpdump.
+- Double protection IPv6 : ip6tables OUTPUT DROP (réseau) + `ipv4_only: true` dans librqbit (application).
+- Ajout de la rotation des logs Docker pour Gluetun et le seeder (10 Mo, 3 fichiers).
+- Documentation du comportement fail-closed de Gluetun dans `compose.yaml`.
+- Kill switch fail-closed validé : Gluetun bloque tout trafic non-VPN même sans tunnel établi (identifiants invalides).
+- Kill switch tunnel actif validé : blocage immédiat après `kill -9` sur le processus OpenVPN (2026-11-06).
+- Diagnostics live exécutés sur le tunnel de production NordVPN actif (IP 186.247.77.219, Pays-Bas).
+- Ajout du cas de test `nordvpn/wireguard` dans `test_vpn_config.py`.
+- Ajout de la section VPN dans `norylum-doctor.sh` : validité config, santé Gluetun, état seeder.
+- Vérification chaîne iptables INPUT : absence de règle pour tun0, seeder outbound-only confirmé.
+- Documentation des propriétés de sécurité du seeder : `ipv4_only`, sans UPnP, sans ports entrants.
+- Mise à jour de `docs/NORDVPN_TORRENT.md` : résultats de validation, table des risques résiduels, procédure de retour arrière.
+
+
 ### Acquisition V3.2 - Authorized source registry
 
 - Added immutable HTTPS source records per acquisition request.
