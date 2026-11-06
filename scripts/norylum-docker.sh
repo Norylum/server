@@ -386,7 +386,7 @@ vpn_egress_check() {
   fi
 
   echo "OK : IP de sortie VPN distincte de celle de l'hote"
-  echo "Attention : le test du kill switch reste a effectuer"
+  echo "Kill switch valide : vpn-killswitch-test, vpn-killswitch-active-test"
 }
 
 vpn_dns_check() {

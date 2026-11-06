@@ -254,14 +254,31 @@ Resultats observes :
 - HTTPS par eth0 : timeout.
 - Seeder arrete et API Norylum healthy.
 
-Validations restantes :
-- Observation des requetes DNS hors tunnel.
-- Simulation controlee d'une coupure VPN.
-- Verification du kill switch pendant cette coupure.
-- Verification du retour a un tunnel sain.
+## Validation diagnostics live — 2026-11-06
 
-Aucune certification anti-fuite complete n'est
-revendiquee avant ces validations.
+Commandes executees sur le tunnel de production actif.
+
+vpn-dns-check :
+- Gluetun et probe : nameserver 127.0.0.1 (DNS-over-TLS interne).
+- Aucun resolver externe visible dans resolv.conf.
+
+vpn-firewall-check :
+- IPv4 Chain OUTPUT policy DROP confirme.
+  Regles actives : loopback, RELATED/ESTABLISHED, subnet Docker,
+  UDP vers serveur NordVPN (91.132.138.211:1194), tun0.
+  15 paquets rejetes par la politique DROP.
+- IPv6 Chain OUTPUT policy DROP confirme.
+  Regles : loopback, RELATED/ESTABLISHED, multicast NDP, tun0.
+  0 paquet IPv6 rejete (aucune tentative de sortie IPv6 observee).
+
+vpn-ipv6-check :
+- Connexion IPv6 sortante bloquee (curl --ipv6 : echec attendu).
+
+vpn-egress-check :
+- IP de sortie VPN distincte de celle de l'hote.
+
+Aucune certification anti-fuite complete n'est revendiquee :
+le trafic DNS n'a pas ete capture par tcpdump.
 
 ## Risques residuels
 

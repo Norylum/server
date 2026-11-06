@@ -33,6 +33,8 @@ class VPNConfigTests(unittest.TestCase):
             ("airvpn", "wireguard",
              ["wireguard_private_key", "wireguard_addresses",
               "wireguard_preshared_key"]),
+            ("nordvpn", "wireguard",
+             ["wireguard_private_key"]),
             ("nordvpn", "openvpn",
              ["openvpn_user", "openvpn_password"]),
             ("private internet access", "openvpn",
