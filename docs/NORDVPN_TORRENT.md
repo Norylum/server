@@ -113,3 +113,31 @@ Infrastructure de seeding implementee.
 NordVPN reel, DNS, IPv6 et kill switch non valides.
 Acquisition BitTorrent automatique non implementee.
 Ne pas annoncer le parcours complet comme termine.
+
+
+## Validation NordVPN — 2026-11-03
+
+Configuration testee :
+- Gluetun v3.41.3
+- NordVPN OpenVPN UDP
+- Pays-Bas
+- Liste de serveurs actualisee dans vpn-state/
+
+Resultats observes :
+- Tunnel initialise et Gluetun healthy.
+- IPv4 publique VPN distincte de celle du Mac.
+- HTTPS via VPN fonctionnel.
+- Connexion IPv6 externe non etablie.
+- Pare-feu IPv4 et IPv6 en politique OUTPUT DROP.
+- HTTPS par tun0 : HTTP 301.
+- HTTPS par eth0 : timeout.
+- Seeder arrete et API Norylum healthy.
+
+Validations restantes :
+- Observation des requetes DNS hors tunnel.
+- Simulation controlee d'une coupure VPN.
+- Verification du kill switch pendant cette coupure.
+- Verification du retour a un tunnel sain.
+
+Aucune certification anti-fuite complete n'est
+revendiquee avant ces validations.

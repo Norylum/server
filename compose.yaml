@@ -50,11 +50,13 @@ services:
     environment:
       VPN_SERVICE_PROVIDER: ${NORYLUM_VPN_PROVIDER:-protonvpn}
       VPN_TYPE: ${NORYLUM_VPN_TYPE:-wireguard}
+      OPENVPN_PROTOCOL: ${NORYLUM_OPENVPN_PROTOCOL:-udp}
       SERVER_COUNTRIES: ${NORYLUM_VPN_COUNTRIES:-}
       SERVER_REGIONS: ${NORYLUM_VPN_REGIONS:-}
       VPN_PORT_FORWARDING: "off"
     volumes:
       - ./vpn-secrets:/run/secrets:ro
+      - ./vpn-state:/gluetun
 
   seeder:
     profiles:
