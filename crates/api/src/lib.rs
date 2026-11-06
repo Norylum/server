@@ -16,6 +16,7 @@ use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use axum::middleware;
 use axum::{Json, Router};
+use norylum_auth::rate_limit::{auth_rate_limit, new_auth_rate_limiter};
 use norylum_auth::AuthService;
 use norylum_authorization::Authorizer;
 use norylum_catalog::{CatalogService, SeasonDetails, ShowDetails, ShowRecord};
@@ -260,6 +261,10 @@ pub fn create_router(state: AppState) -> Router {
             "/requests/:id/cancel",
             axum::routing::post(acquisition_routes::cancel_handler),
         )
+        .route(
+            "/requests/:id/source",
+            axum::routing::post(acquisition_routes::register_source_handler),
+        )
         .with_state(state.clone());
 
     let torrent_routes = Router::new()
@@ -393,6 +398,26 @@ pub fn create_router(state: AppState) -> Router {
             "/v1/auth/logout",
             axum::routing::post(auth_routes::logout_handler).with_state(auth.clone()),
         )
+        .layer(middleware::from_fn_with_state(
+            auth.clone(),
+            auth_routes::auth_middleware,
+        ));
+
+    let limiter = new_auth_rate_limiter();
+
+    // /v1/auth/login — rate limitée, hors middleware d'authentification
+    let rate_limited_login = Router::new()
+        .route(
+            "/v1/auth/login",
+            axum::routing::post(auth_routes::login_handler).with_state(auth.clone()),
+        )
+        .layer(middleware::from_fn_with_state(
+            limiter.clone(),
+            auth_rate_limit,
+        ));
+
+    // /v1/auth/switch-profile — rate limitée puis authentifiée
+    let rate_limited_switch = Router::new()
         .route(
             "/v1/auth/switch-profile",
             axum::routing::post(auth_routes::switch_profile_handler).with_state(auth.clone()),
@@ -400,14 +425,16 @@ pub fn create_router(state: AppState) -> Router {
         .layer(middleware::from_fn_with_state(
             auth.clone(),
             auth_routes::auth_middleware,
+        ))
+        .layer(middleware::from_fn_with_state(
+            limiter,
+            auth_rate_limit,
         ));
 
     Router::new()
         .route("/health", axum::routing::get(|| async { "OK" }))
-        .route(
-            "/v1/auth/login",
-            axum::routing::post(auth_routes::login_handler).with_state(auth),
-        )
+        .merge(rate_limited_login)
+        .merge(rate_limited_switch)
         .merge(protected)
 }
 

@@ -45,3 +45,4 @@ http-body-util = "0.1"
 rusqlite = { version = "0.32", features = ["bundled", "chrono"] }
 reqwest = { version = "0.12", features = ["json"] }
 regex = "1"
+governor = { version = "0.10", features = ["dashmap"] }

@@ -2173,7 +2173,9 @@ name = "norylum-auth"
 version = "0.1.0"
 dependencies = [
  "argon2",
+ "axum 0.7.9",
  "chrono",
+ "governor",
  "norylum-foundation",
  "norylum-persistence",
  "rand_core 0.6.4",

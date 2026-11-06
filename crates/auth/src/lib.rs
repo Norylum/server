@@ -15,6 +15,7 @@ use uuid::Uuid;
 const SESSION_LIFETIME: i64 = 7 * 24 * 60 * 60;
 
 mod pin;
+pub mod rate_limit;
 
 fn storage(error: impl std::fmt::Display) -> NorylumError {
     NorylumError::Internal(format!("Erreur auth SQLite : {error}"))
