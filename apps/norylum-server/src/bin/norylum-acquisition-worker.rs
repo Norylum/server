@@ -359,6 +359,10 @@ async fn resolve_torrent_add(
         .no_proxy()
         .timeout(Duration::from_secs(30))
         .resolve(&host, pinned)
+        // Rejeter les redirections : un fichier .torrent n'a pas de raison légitime
+        // de rediriger, et une redirection pourrait pointer vers une IP interne en
+        // contournant le DNS pinning ci-dessus.
+        .redirect(reqwest::redirect::Policy::none())
         .build()?;
 
     let bytes = client
