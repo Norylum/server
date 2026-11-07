@@ -86,6 +86,7 @@ Les modules sont organisés par responsabilité afin de faciliter la maintenance
 - VPN Gluetun (NordVPN/ProtonVPN/Mullvad…), isolation réseau, kill switch validé.
 - Diagnostics VPN : DNS, pare-feu, IPv6, kill switch fail-closed et tunnel actif.
 - Worker d'acquisition : réservations atomiques, sources de confiance, téléchargement HTTPS via VPN avec vérification SHA-256.
+- Cache local des affiches TMDB : téléchargement à l'association, serving via `GET /v1/images/posters/:filename`.
 - Limitation de débit par IP sur les routes d'authentification (10 req/min, `governor`).
 - Interface d'administration Web WASM (Leptos 0.7, Trunk, nginx) — module optionnel (`--profile web`).
 - Tests unitaires et d'intégration ; test E2E cycle de vie torrent (isolé).
@@ -93,7 +94,6 @@ Les modules sont organisés par responsabilité afin de faciliter la maintenance
 ## 🚧 Développement en cours
 
 - Transcodage et streaming adaptatif (GPU : QSV, NVENC, VAAPI, VideoToolbox).
-- Cache local des affiches TMDB.
 
 Les modules présents dans le workspace ne sont pas tous entièrement implémentés. Ne pas exposer le serveur publiquement sans reverse proxy HTTPS.
 

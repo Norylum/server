@@ -12,9 +12,11 @@ mod metadata_routes;
 mod playback_sync_routes;
 mod torrent_routes;
 
+use axum::body::Body;
 use axum::extract::{Path, State};
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, HeaderValue};
 use axum::middleware;
+use axum::response::Response;
 use axum::{Json, Router};
 use norylum_auth::rate_limit::{auth_rate_limit, new_auth_rate_limiter};
 use norylum_auth::AuthService;
@@ -23,13 +25,47 @@ use norylum_catalog::{CatalogService, SeasonDetails, ShowDetails, ShowRecord};
 use norylum_devices::DeviceService;
 use norylum_foundation::{NorylumError, ShowId};
 use norylum_library::{IngestionService, MediaItem, MediaScanner};
-use norylum_metadata::TmdbClient;
+use norylum_metadata::{PosterCache, TmdbClient};
 use norylum_playback::PlaybackService;
 use norylum_profiles::ProfileService;
 use norylum_streaming::StreamingState;
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Arc;
+
+/// GET /v1/images/posters/:filename — sert une affiche mise en cache localement.
+/// Route publique : pas de jeton requis (les navigateurs ne peuvent pas envoyer
+/// des en-têtes Authorization sur une balise <img>).
+pub async fn serve_poster_handler(
+    State(poster_cache): State<Arc<PosterCache>>,
+    Path(filename): Path<String>,
+) -> Result<Response<Body>, NorylumError> {
+    let path = poster_cache
+        .cached_path(&filename)
+        .ok_or_else(|| NorylumError::NotFound("Affiche introuvable".into()))?;
+
+    let bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|_| NorylumError::NotFound("Affiche introuvable".into()))?;
+
+    let content_type = if filename.to_ascii_lowercase().ends_with(".png") {
+        "image/png"
+    } else {
+        "image/jpeg"
+    };
+
+    let mut resp = Response::new(Body::from(bytes));
+    resp.headers_mut().insert(
+        "Content-Type",
+        HeaderValue::from_static(content_type),
+    );
+    resp.headers_mut().insert(
+        "Cache-Control",
+        HeaderValue::from_static("max-age=31536000, immutable"),
+    );
+
+    Ok(resp)
+}
 
 /// État partagé unifié du monolithe modulaire Norylum.
 #[derive(Clone)]
@@ -211,11 +247,19 @@ pub fn create_router(state: AppState) -> Router {
         authorizer: state.authorizer.clone(),
     };
 
+    let poster_cache = Arc::new(PosterCache::new(
+        state.library_root.join(".norylum-images/posters"),
+    ));
+    if let Err(e) = poster_cache.prepare_dir() {
+        tracing::warn!(error = %e, "Impossible de creer le repertoire de cache des affiches");
+    }
+
     let metadata_state = metadata_routes::MetadataState {
         catalog: state.catalog.clone(),
         authorizer: state.authorizer.clone(),
         db: state.playback.db().clone(),
         tmdb: TmdbClient::from_env(),
+        poster_cache: poster_cache.clone(),
     };
 
     let metadata_routes = Router::new()
@@ -433,6 +477,10 @@ pub fn create_router(state: AppState) -> Router {
 
     Router::new()
         .route("/health", axum::routing::get(|| async { "OK" }))
+        .route(
+            "/v1/images/posters/:filename",
+            axum::routing::get(serve_poster_handler).with_state(poster_cache),
+        )
         .merge(rate_limited_login)
         .merge(rate_limited_switch)
         .merge(protected)

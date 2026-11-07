@@ -8,7 +8,7 @@ use axum::{
 use norylum_authorization::{Authorizer, MediaAccessInfo};
 use norylum_catalog::CatalogService;
 use norylum_foundation::{MediaId, NorylumError, RequestContext, ShowId};
-use norylum_metadata::{parse_relative_path, ParsedName, TmdbClient, TmdbItem, TmdbKind};
+use norylum_metadata::{parse_relative_path, ParsedName, PosterCache, TmdbClient, TmdbItem, TmdbKind};
 use norylum_persistence::{Database, MetadataRecord};
 use serde::Deserialize;
 use std::sync::Arc;
@@ -19,6 +19,7 @@ pub(crate) struct MetadataState {
     pub authorizer: Arc<dyn Authorizer>,
     pub db: Database,
     pub tmdb: TmdbClient,
+    pub poster_cache: Arc<PosterCache>,
 }
 
 #[derive(Deserialize)]
@@ -118,11 +119,15 @@ pub(crate) async fn get_movie_handler(
 ) -> Result<Json<MetadataRecord>, NorylumError> {
     checked_movie(&state, &ctx, &media_id).await?;
 
-    let record = state
+    let mut record = state
         .db
         .get_movie_metadata(&media_id)
         .await?
         .ok_or_else(|| NorylumError::NotFound("Aucune association TMDB pour ce film".into()))?;
+
+    if let Some(url) = record.poster_url.as_deref().and_then(|u| state.poster_cache.local_url_if_cached(u)) {
+        record.poster_url = Some(url);
+    }
 
     Ok(Json(record))
 }
@@ -148,8 +153,15 @@ pub(crate) async fn set_movie_handler(
     }
 
     let item = state.tmdb.details(TmdbKind::Movie, payload.tmdb_id).await?;
+    let mut record = state.db.set_movie_metadata(&media_id, &item).await?;
 
-    Ok(Json(state.db.set_movie_metadata(&media_id, &item).await?))
+    if let Some(path) = item.poster_path.as_deref() {
+        if let Some(local_url) = state.poster_cache.store(path).await {
+            record.poster_url = Some(local_url);
+        }
+    }
+
+    Ok(Json(record))
 }
 
 /// GET /v1/metadata/shows/:show_id
@@ -160,10 +172,14 @@ pub(crate) async fn get_show_handler(
 ) -> Result<Json<MetadataRecord>, NorylumError> {
     checked_show(&state, &ctx, &show_id).await?;
 
-    let record =
+    let mut record =
         state.db.get_show_metadata(&show_id).await?.ok_or_else(|| {
             NorylumError::NotFound("Aucune association TMDB pour cette serie".into())
         })?;
+
+    if let Some(url) = record.poster_url.as_deref().and_then(|u| state.poster_cache.local_url_if_cached(u)) {
+        record.poster_url = Some(url);
+    }
 
     Ok(Json(record))
 }
@@ -179,8 +195,15 @@ pub(crate) async fn set_show_handler(
     checked_show(&state, &ctx, &show_id).await?;
 
     let item = state.tmdb.details(TmdbKind::Tv, payload.tmdb_id).await?;
+    let mut record = state.db.set_show_metadata(&show_id, &item).await?;
 
-    Ok(Json(state.db.set_show_metadata(&show_id, &item).await?))
+    if let Some(path) = item.poster_path.as_deref() {
+        if let Some(local_url) = state.poster_cache.store(path).await {
+            record.poster_url = Some(local_url);
+        }
+    }
+
+    Ok(Json(record))
 }
 
 /// GET /v1/metadata/media/:media_id/suggestions

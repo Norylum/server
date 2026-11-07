@@ -18,6 +18,15 @@ Elles ne constituent pas des publications de versions stables.
 
 ## [Unreleased]
 
+### Metadata V3 — Cache local des affiches TMDB
+
+- Nouveau `PosterCache` dans `crates/metadata/src/poster_cache.rs` : télécharge les affiches TMDB (w500) au moment où une association est posée et les stocke dans `media/.norylum-images/posters/`.
+- Idempotent : ne re-télécharge pas si le fichier existe déjà.
+- `GET /v1/images/posters/:filename` — route publique servant les affiches locales avec `Cache-Control: max-age=31536000, immutable`.
+- `poster_url` dans les réponses API retourne l'URL locale si l'affiche est en cache, sinon l'URL TMDB (fallback gracieux).
+- Validation stricte des noms de fichiers : pas de traversée de chemin, extensions `.jpg`/`.jpeg`/`.png` uniquement.
+- Pas de migration SQLite : `poster_path` existant suffit pour reconstruire le nom local.
+
 ### Profiles V4 — Codes PIN pour profils enfants
 
 - Les profils enfants peuvent désormais recevoir un code PIN (6 à 8 chiffres).
