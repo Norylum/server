@@ -132,6 +132,7 @@ services:
       RUST_LOG: ${NORYLUM_RUST_LOG:-info}
       NORYLUM_PROWLARR_URL: ${NORYLUM_PROWLARR_URL:-}
       NORYLUM_PROWLARR_KEY: ${NORYLUM_PROWLARR_KEY:-}
+      NORYLUM_WEBHOOK_URL: ${NORYLUM_WEBHOOK_URL:-}
     volumes:
       - ./media:/data/media
 
@@ -175,6 +176,25 @@ services:
       - "15"
       - https://api.ipify.org
 
+  caddy:
+    profiles:
+      - proxy
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"  # HTTP/3 QUIC
+    environment:
+      NORYLUM_DOMAIN: ${NORYLUM_DOMAIN:?Set NORYLUM_DOMAIN to use the proxy profile}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      server:
+        condition: service_healthy
+
   maintenance:
     profiles:
       - maintenance
@@ -192,3 +212,7 @@ services:
       NORYLUM_MEDIA_DIR: /data/media
     volumes:
       - ./media:/data/media
+
+volumes:
+  caddy_data:
+  caddy_config:

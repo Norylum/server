@@ -139,6 +139,9 @@ pub async fn register_source(id: &str, payload: &RegisterSourcePayload<'_>) -> R
 pub struct TorrentShare {
     pub media_id: String,
     pub enabled: bool,
+    pub uploaded_bytes: u64,
+    pub upload_bps: u64,
+    pub peer_count: Option<u32>,
 }
 
 pub async fn list_shares() -> Result<Vec<TorrentShare>, String> {

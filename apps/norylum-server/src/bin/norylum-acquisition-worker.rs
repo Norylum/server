@@ -279,7 +279,9 @@ async fn download_and_stage_https(
     }
 
     println!("Staged : {staging_name}");
+    let request_id = lease.request_id.clone();
     db.finish_acquisition_claim(lease, "available").await?;
+    fire_webhook(request_id);
     println!("OK : acquisition {} disponible pour indexation automatique", lease.request_id);
     Ok(())
 }
@@ -498,7 +500,9 @@ async fn download_and_stage_torrent(
     }
 
     println!("Staged : {staging_name}");
+    let request_id = lease.request_id.clone();
     db.finish_acquisition_claim(lease, "available").await?;
+    fire_webhook(request_id);
     println!(
         "OK : acquisition {} disponible pour indexation automatique",
         lease.request_id
@@ -614,6 +618,33 @@ fn derive_staging_name(url: &str) -> String {
     }
 
     format!("norylum-acq-{}.mp4", uuid::Uuid::new_v4().as_simple())
+}
+
+/// Fire-and-forget webhook on acquisition success.
+/// Reads `NORYLUM_WEBHOOK_URL` from the environment; silently does nothing if unset.
+fn fire_webhook(request_id: String) {
+    let url = match std::env::var("NORYLUM_WEBHOOK_URL") {
+        Ok(u) if !u.is_empty() => u,
+        _ => return,
+    };
+    tokio::spawn(async move {
+        let body = serde_json::json!({
+            "event": "acquisition_completed",
+            "request_id": request_id,
+        });
+        let result = reqwest::Client::builder()
+            .no_proxy()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .unwrap()
+            .post(&url)
+            .json(&body)
+            .send()
+            .await;
+        if let Err(e) = result {
+            eprintln!("WARN : webhook échoué : {e}");
+        }
+    });
 }
 
 fn find_largest_file(dir: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {

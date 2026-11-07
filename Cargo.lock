@@ -2168,6 +2168,7 @@ dependencies = [
  "norylum-transcoding",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "tokio-util",
  "tower",

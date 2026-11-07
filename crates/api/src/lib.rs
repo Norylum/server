@@ -142,10 +142,76 @@ pub async fn scan_library_handler(
     // Propagate SQLite failures rather than returning a false positive.
     state.playback.db().sync_media_items(&items).await?;
 
+    // Also pick up any subtitle files that sit alongside the videos.
+    sync_subtitles(&state).await;
+
     Ok(Json(ScanResponse {
         scanned_count: count,
         message: format!("Scan terminé avec succès. {} éléments indexés.", count),
     }))
+}
+
+/// Match subtitle candidates from disk to indexed media items and upsert them in the DB.
+/// Errors are logged but never propagated — subtitles are supplementary.
+pub(crate) async fn sync_subtitles(state: &AppState) {
+    use norylum_library::SubtitleCandidate;
+    use sha2::{Digest, Sha256};
+
+    let candidates: Vec<SubtitleCandidate> = match state.scanner.scan_subtitles().await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(error = %e, "Scan des sous-titres échoué");
+            return;
+        }
+    };
+
+    // Build a lookup: (dir_prefix, video_stem) → media_id.
+    let all_media = match state.playback.db().list_all_media().await {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::warn!(error = %e, "Lecture catalogue pour sous-titres échouée");
+            return;
+        }
+    };
+
+    use std::collections::HashMap;
+    let media_by_stem: HashMap<(String, String), String> = all_media
+        .into_iter()
+        .filter_map(|m| {
+            let p = std::path::Path::new(&m.relative_path);
+            let dir = p.parent()?.to_string_lossy().to_string();
+            let stem = p.file_stem()?.to_string_lossy().to_string();
+            Some(((dir, stem), m.id.to_string()))
+        })
+        .collect();
+
+    for c in candidates {
+        let dir = std::path::Path::new(&c.relative_path)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let key = (dir, c.video_stem.clone());
+
+        let Some(media_id) = media_by_stem.get(&key) else {
+            continue;
+        };
+
+        let subtitle_id = format!(
+            "sub_{:x}",
+            &Sha256::digest(c.relative_path.as_bytes())[..8]
+                .iter()
+                .fold(0u64, |acc, &b| (acc << 8) | b as u64)
+        );
+
+        if let Err(e) = state
+            .playback
+            .db()
+            .upsert_subtitle_track(&subtitle_id, media_id, &c.lang, &c.format, &c.relative_path)
+            .await
+        {
+            tracing::warn!(error = %e, path = c.relative_path, "Upsert sous-titre échoué");
+        }
+    }
 }
 
 /// Handler `GET /v1/library/media`
@@ -349,6 +415,57 @@ pub async fn transcode_media_handler(
         .map_err(|e| NorylumError::Internal(e.to_string()))
 }
 
+/// GET /v1/media/:id/subtitles — liste les pistes de sous-titres disponibles.
+pub async fn list_subtitles_handler(
+    State(state): State<AppState>,
+    Path(media_id): Path<norylum_foundation::MediaId>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<norylum_persistence::SubtitleTrack>>, NorylumError> {
+    let ctx = norylum_streaming::extract_request_context_from_headers(&headers);
+    state.authorizer.authorize_request(&ctx).await?;
+
+    let tracks = state.playback.db().subtitle_tracks_for_media(media_id.as_str()).await?;
+    Ok(Json(tracks))
+}
+
+/// GET /v1/media/:id/subtitles/:lang — sert le fichier de sous-titres.
+pub async fn serve_subtitle_handler(
+    State(state): State<AppState>,
+    Path((media_id, lang)): Path<(norylum_foundation::MediaId, String)>,
+    headers: HeaderMap,
+) -> Result<Response<Body>, NorylumError> {
+    let ctx = norylum_streaming::extract_request_context_from_headers(&headers);
+    state.authorizer.authorize_request(&ctx).await?;
+
+    // Find the matching track.
+    let tracks = state.playback.db().subtitle_tracks_for_media(media_id.as_str()).await?;
+    let track = tracks
+        .into_iter()
+        .find(|t| t.lang == lang)
+        .ok_or_else(|| NorylumError::NotFound("Piste de sous-titres introuvable".into()))?;
+
+    let path = norylum_library::PathSanitizer::sanitize_path(
+        &state.library_root,
+        std::path::Path::new(&track.relative_path),
+    )?;
+
+    let bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|_| NorylumError::NotFound("Fichier de sous-titres introuvable".into()))?;
+
+    let content_type = if track.format == "vtt" {
+        "text/vtt; charset=utf-8"
+    } else {
+        "application/x-subrip"
+    };
+
+    Response::builder()
+        .header("Content-Type", content_type)
+        .header("Cache-Control", "max-age=3600")
+        .body(Body::from(bytes))
+        .map_err(|e| NorylumError::Internal(e.to_string()))
+}
+
 /// Construit et configure le routeur Axum pour Norylum Server.
 pub fn create_router(state: AppState) -> Router {
     let auth = state.auth.clone();
@@ -481,6 +598,14 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/:media_id/transcode",
             axum::routing::get(transcode_media_handler),
+        )
+        .route(
+            "/:media_id/subtitles",
+            axum::routing::get(list_subtitles_handler),
+        )
+        .route(
+            "/:media_id/subtitles/:lang",
+            axum::routing::get(serve_subtitle_handler),
         )
         .with_state(state);
 

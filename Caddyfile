@@ -1,0 +1,15 @@
+# Norylum reverse proxy — Caddy auto-TLS.
+#
+# Usage:
+#   NORYLUM_DOMAIN=your.domain docker compose --profile proxy up -d
+#
+# If NORYLUM_DOMAIN is empty the server stays on HTTP 127.0.0.1:8120 only.
+
+{env.NORYLUM_DOMAIN} {
+    encode zstd gzip
+
+    reverse_proxy server:8120 {
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+}

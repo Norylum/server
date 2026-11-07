@@ -31,6 +31,9 @@ pub use ingestion::IngestionJob;
 mod embedded_tags;
 pub use embedded_tags::EmbeddedMediaTags;
 
+mod subtitles;
+pub use subtitles::SubtitleTrack;
+
 mod metadata;
 mod playback_sync;
 mod playback_sync_v2;
@@ -410,6 +413,9 @@ impl Database {
              ON auth_sessions(device_id);",
         )
         .map_err(|e| NorylumError::Internal(format!("Migration sessions devices : {e}")))?;
+
+        conn.execute_batch(include_str!("subtitles_migration.sql"))
+            .map_err(|e| NorylumError::Internal(format!("Migration sous-titres : {e}")))?;
 
         tracing::info!(
             "Base SQLite Norylum initialisée avec succès (WAL activé, migrations appliquées)"

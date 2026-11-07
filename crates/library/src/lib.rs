@@ -383,6 +383,107 @@ impl MediaScanner {
 
         Ok(items)
     }
+
+    /// Parcourt la bibliothèque et retourne tous les fichiers sous-titres trouvés.
+    /// Chaque entrée est { relative_path, video_stem, lang, format } prête à être
+    /// croisée avec le catalogue pour obtenir le media_id correspondant.
+    pub async fn scan_subtitles(&self) -> Result<Vec<SubtitleCandidate>, NorylumError> {
+        let canonical_root = std::fs::canonicalize(&self.root_dir).map_err(|e| {
+            NorylumError::Internal(format!("Dossier racine introuvable: {e}"))
+        })?;
+
+        let mut candidates = Vec::new();
+        let mut dir_queue = vec![canonical_root.clone()];
+
+        while let Some(current_dir) = dir_queue.pop() {
+            let mut entries = tokio::fs::read_dir(&current_dir)
+                .await
+                .map_err(NorylumError::Io)?;
+
+            while let Some(entry) = entries.next_entry().await.map_err(NorylumError::Io)? {
+                let path = entry.path();
+
+                if path.is_dir() {
+                    if current_dir == canonical_root
+                        && path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .is_some_and(|n| n.starts_with(".norylum-"))
+                    {
+                        continue;
+                    }
+                    dir_queue.push(path);
+                } else if path.is_file() {
+                    let ext = path
+                        .extension()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_ascii_lowercase();
+
+                    if !matches!(ext.as_str(), "srt" | "vtt") {
+                        continue;
+                    }
+
+                    let safe_path = match PathSanitizer::sanitize_path(&canonical_root, &path) {
+                        Ok(p) => p,
+                        Err(_) => continue,
+                    };
+                    let relative = match safe_path.strip_prefix(&canonical_root) {
+                        Ok(r) => r.to_string_lossy().to_string(),
+                        Err(_) => continue,
+                    };
+
+                    let file_stem = safe_path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_string();
+
+                    // Detect "movie.fr" (lang-suffixed) vs plain "movie" stems.
+                    let (video_stem, lang) = parse_subtitle_stem(&file_stem);
+
+                    candidates.push(SubtitleCandidate {
+                        relative_path: relative,
+                        video_stem,
+                        lang,
+                        format: ext,
+                    });
+                }
+            }
+        }
+
+        Ok(candidates)
+    }
+}
+
+/// A subtitle file found on disk, before it has been matched to a media_id.
+#[derive(Debug, Clone)]
+pub struct SubtitleCandidate {
+    pub relative_path: String,
+    /// Stem of the companion video file (e.g. "movie" for "movie.fr.srt").
+    pub video_stem: String,
+    /// BCP-47-ish language tag, or "und" if not detectable.
+    pub lang: String,
+    /// "srt" or "vtt".
+    pub format: String,
+}
+
+fn parse_subtitle_stem(stem: &str) -> (String, String) {
+    // "movie.fr" → ("movie", "fr")
+    // "movie.pt-BR" → ("movie", "pt-BR")
+    // "movie" → ("movie", "und")
+    if let Some(dot) = stem.rfind('.') {
+        let potential_lang = &stem[dot + 1..];
+        // Accept 2-5 char codes like "fr", "en", "zh", "pt-BR", "spa"
+        if (2..=6).contains(&potential_lang.len())
+            && potential_lang
+                .chars()
+                .all(|c| c.is_ascii_alphabetic() || c == '-')
+        {
+            return (stem[..dot].to_string(), potential_lang.to_ascii_lowercase());
+        }
+    }
+    (stem.to_string(), "und".to_string())
 }
 
 #[cfg(test)]

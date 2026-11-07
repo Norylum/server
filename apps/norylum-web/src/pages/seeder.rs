@@ -30,18 +30,27 @@ pub fn Seeder() -> impl IntoView {
                                 <thead class="text-xs text-zinc-500 uppercase border-b border-zinc-800">
                                     <tr>
                                         <th class="pb-2 pr-4">"Média"</th>
-                                        <th class="pb-2">"État"</th>
+                                        <th class="pb-2 pr-4">"État"</th>
+                                        <th class="pb-2 pr-4">"Pairs"</th>
+                                        <th class="pb-2 pr-4">"Envoyé"</th>
+                                        <th class="pb-2">"Débit"</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {items.into_iter().map(|share| {
                                         let status = if share.enabled { "enabled" } else { "disabled" };
+                                        let uploaded_mib = share.uploaded_bytes / (1024 * 1024);
+                                        let upload_kbps = share.upload_bps / 1024;
+                                        let peers = share.peer_count.map(|n| n.to_string()).unwrap_or_else(|| "—".into());
                                         view! {
                                             <tr class="border-b border-zinc-900 hover:bg-zinc-900/50">
                                                 <td class="py-2 pr-4 font-mono text-xs text-zinc-400">{share.media_id}</td>
-                                                <td class="py-2">
+                                                <td class="py-2 pr-4">
                                                     <StatusBadge status=status.to_string()/>
                                                 </td>
+                                                <td class="py-2 pr-4 text-sm text-zinc-300">{peers}</td>
+                                                <td class="py-2 pr-4 text-sm text-zinc-300">{format!("{uploaded_mib} MiB")}</td>
+                                                <td class="py-2 text-sm text-zinc-300">{format!("{upload_kbps} KB/s")}</td>
                                             </tr>
                                         }
                                     }).collect::<Vec<_>>()}
