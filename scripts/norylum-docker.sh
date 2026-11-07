@@ -62,6 +62,12 @@ Norylum Docker
                                     Afficher les journaux et le magnet
   scripts/norylum-docker.sh ingest FICHIER
                                     Copier un fichier dans le staging et signaler .ready
+  scripts/norylum-docker.sh web-start
+                                    Construire et demarrer l'interface web WASM
+  scripts/norylum-docker.sh web-stop
+                                    Arreter l'interface web
+  scripts/norylum-docker.sh web-logs
+                                    Afficher les journaux de l'interface web
 USAGE
 }
 
@@ -925,6 +931,21 @@ acquisition_status() {
     echo "INFO : service acquisition-worker non demarre"
 }
 
+web_start() {
+  require_config
+  echo "Construction et demarrage de l'interface web..."
+  "${DC[@]}" --profile web up -d --build norylum-web
+  echo "Interface disponible sur http://127.0.0.1:3000"
+}
+
+web_stop() {
+  "${DC[@]}" --profile web stop norylum-web
+}
+
+web_logs() {
+  "${DC[@]}" --profile web logs -f --tail=100 norylum-web
+}
+
 case "${1:-}" in
   setup) setup ;;
   start)
@@ -976,5 +997,8 @@ case "${1:-}" in
   torrent-cleanup) torrent_cleanup "${2:-}" ;;
   torrent-logs) torrent_logs ;;
   ingest) ingest "${2:-}" ;;
+  web-start) web_start ;;
+  web-stop) web_stop ;;
+  web-logs) web_logs ;;
   *) usage; exit 2 ;;
 esac

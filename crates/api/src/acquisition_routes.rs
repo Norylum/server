@@ -13,6 +13,14 @@ use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub(crate) struct RegisterSourcePayload {
+    source_url: String,
+    expected_sha256: String,
+    allowed_hosts: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct RequestPayload {
     kind: TmdbKind,
     tmdb_id: u64,
@@ -136,6 +144,36 @@ pub(crate) async fn cancel_handler(
         .await?;
 
     Ok(Json(request))
+}
+
+/// POST /v1/acquisition/requests/:id/source
+pub(crate) async fn register_source_handler(
+    State(state): State<AppState>,
+    Extension(ctx): Extension<RequestContext>,
+    Path(id): Path<String>,
+    Json(payload): Json<RegisterSourcePayload>,
+) -> Result<StatusCode, NorylumError> {
+    principal(&state, &ctx).await?;
+
+    if !valid_request_id(&id) {
+        return Err(NorylumError::NotFound(
+            "Demande d'acquisition introuvable".into(),
+        ));
+    }
+
+    state
+        .playback
+        .db()
+        .register_acquisition_source(
+            ctx.account_id(),
+            &id,
+            &payload.source_url,
+            &payload.expected_sha256,
+            &payload.allowed_hosts,
+        )
+        .await?;
+
+    Ok(StatusCode::CREATED)
 }
 
 /// GET /v1/acquisition/requests/:id

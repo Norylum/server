@@ -133,6 +133,19 @@ services:
     volumes:
       - ./media:/data/media
 
+  norylum-web:
+    profiles:
+      - web
+    build:
+      context: apps/norylum-web
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:3000:80"
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: unless-stopped
+
   vpn-probe:
     profiles:
       - vpn-test
