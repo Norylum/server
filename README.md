@@ -85,14 +85,14 @@ Les modules sont organisés par responsabilité afin de faciliter la maintenance
 - Moteur BitTorrent opt-in avec librqbit (`norylum-seeder`), snapshots SHA-256, nettoyage explicite.
 - VPN Gluetun (NordVPN/ProtonVPN/Mullvad…), isolation réseau, kill switch validé.
 - Diagnostics VPN : DNS, pare-feu, IPv6, kill switch fail-closed et tunnel actif.
-- Worker d'acquisition avec réservations atomiques et sources de confiance vérifiées.
+- Worker d'acquisition : réservations atomiques, sources de confiance, téléchargement HTTPS via VPN avec vérification SHA-256.
+- Limitation de débit par IP sur les routes d'authentification (10 req/min, `governor`).
+- Interface d'administration Web WASM (Leptos 0.7, Trunk, nginx) — module optionnel (`--profile web`).
 - Tests unitaires et d'intégration ; test E2E cycle de vie torrent (isolé).
 
 ## 🚧 Développement en cours
 
 - Transcodage et streaming adaptatif (GPU : QSV, NVENC, VAAPI, VideoToolbox).
-- Frontend Web (conteneur séparé, optionnel).
-- Worker d'acquisition réseau : indexeur, validation de source, téléchargement via VPN.
 - Codes PIN individuels pour profils enfants.
 - Cache local des affiches TMDB.
 

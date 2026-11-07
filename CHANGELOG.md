@@ -18,6 +18,52 @@ Elles ne constituent pas des publications de versions stables.
 
 ## [Unreleased]
 
+### Admin Web V1 — Interface d'administration WASM
+
+- Nouveau workspace member `apps/norylum-web` : frontend Leptos 0.7 CSR compilé en WebAssembly via Trunk.
+- Pages : login, dashboard (compteurs + statut VPN/seeder), médiathèque, acquisitions, seeder.
+- Composants : barre de navigation, badge de statut.
+- API client (`api.rs`) en gloo-net : toutes les routes utilisées sont celles du serveur existant.
+- Dockerfile multi-étapes (`rust+trunk` → `nginx:alpine`) sans Node.js.
+- nginx sert le bundle WASM et proxifie `/api/` vers `server:8120`.
+- Service Docker `norylum-web` sous profil `web`, port `127.0.0.1:3000:80`.
+- Nouvelles commandes dans `norylum-docker.sh` : `web-start`, `web-stop`, `web-logs`.
+- Module optionnel à l'installation : `--profile web` uniquement si voulu.
+
+### Auth — Limitation de débit par IP
+
+- Ajout d'un rate limiter `governor` 0.10 (dashmap) sur les routes d'authentification.
+- Quota : 10 tentatives par minute par IP.
+- Extraction IP via `ConnectInfo<SocketAddr>` (Tower middleware).
+- `axum::serve` migré vers `into_make_service_with_connect_info::<SocketAddr>()`.
+- Tests unitaires : `allows_up_to_quota_then_rejects` et `isolates_per_ip`.
+
+### Acquisition V3.3 — Worker réseau sous VPN
+
+- Worker HTTPS opérationnel : vérification VPN active (API Gluetun), claim, téléchargement, staging, clôture.
+- Vérification du statut VPN avant toute opération réseau ou SQLite.
+- Téléchargement SSRF-protégé avec vérification SHA-256 en streaming (`norylum-acquisition-transport`).
+- Renouvellement du bail toutes les 60 s (TTL bail = 90 s), annulé après le téléchargement.
+- Renommage atomique quarantaine → staging + marqueur `.ready` pour l'ingesteur.
+- Service Docker `acquisition-worker` sous profil `acquisition` : `network_mode: service:gluetun`, `restart: "no"`.
+- Nouvelles commandes : `acquisition-run`, `acquisition-logs`, `acquisition-status`.
+- `finish_acquisition_claim` accepte désormais `"available"` comme état terminal.
+
+### Acquisition V3.2 — Registre de sources autorisées
+
+- Added immutable HTTPS source records per acquisition request.
+- Required explicit trusted-host matching and a SHA-256 digest.
+- Prevented claiming approved requests without an authorized source.
+- Restricted source lookup to the current non-expired worker lease.
+- Added URL validation, account-isolation and token-fencing tests.
+- Kept all acquisition networking disabled.
+
+### Route API — Enregistrement de source d'acquisition
+
+- Nouveau `POST /v1/acquisition/requests/:id/source` (protégé, profil principal uniquement).
+- Corps : `source_url`, `expected_sha256`, `allowed_hosts`.
+- Réponses : 201 Created, 400 (validation), 404, 409 (conflit), 401/403.
+
 ### VPN V1 — Réseau, confinement et kill switch
 
 - Ajout des commandes de diagnostic réseau : `vpn-dns-check`, `vpn-firewall-check`, `vpn-ipv6-check`.
