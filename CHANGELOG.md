@@ -18,6 +18,15 @@ Elles ne constituent pas des publications de versions stables.
 
 ## [Unreleased]
 
+### Profiles V4 — Codes PIN pour profils enfants
+
+- Les profils enfants peuvent désormais recevoir un code PIN (6 à 8 chiffres).
+- `set_profile_pin` / `delete_profile_pin` : suppression de la restriction adultes-uniquement.
+- `switch_profile_with_credentials` : branche enfant+PIN avec verrouillage progressif identique aux adultes (5 échecs → 15 min).
+- Profil enfant sans PIN : accès direct préservé (comportement inchangé).
+- Aucune migration SQLite : colonnes `pin_hash`, `pin_failures`, `pin_locked_until` déjà présentes.
+- Tests : `test_child_pin_lifecycle_and_lockout` couvre pose, accès, verrouillage et suppression.
+
 ### Admin Web V1 — Interface d'administration WASM
 
 - Nouveau workspace member `apps/norylum-web` : frontend Leptos 0.7 CSR compilé en WebAssembly via Trunk.

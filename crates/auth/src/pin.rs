@@ -154,11 +154,6 @@ impl AuthService {
 
                 match is_child {
                     None => return Err(NorylumError::NotFound("Profil introuvable".into())),
-                    Some(value) if value != 0 => {
-                        return Err(NorylumError::Forbidden(
-                            "PIN reserve aux profils adultes".into(),
-                        ));
-                    }
                     _ => {}
                 }
 
@@ -345,7 +340,59 @@ impl AuthService {
                             "Mot de passe du compte requis".into(),
                         ));
                     }
+                } else if let Some(encoded) = target_pin_hash {
+                    // Profil enfant avec PIN : verification requise.
+                    let pin = profile_pin.ok_or_else(|| {
+                        NorylumError::Forbidden("PIN requis pour ce profil enfant".into())
+                    })?;
+
+                    if locked_until > now {
+                        return Err(NorylumError::Forbidden(
+                            "PIN temporairement verrouille".into(),
+                        ));
+                    }
+
+                    let accepted = valid_pin(pin) && password_matches(&encoded, pin);
+
+                    if !accepted {
+                        let next = if locked_until > 0 && locked_until <= now {
+                            1
+                        } else {
+                            failures.saturating_add(1)
+                        };
+
+                        let next_lock = if next >= MAX_PIN_FAILURES {
+                            now + PIN_LOCK_SECONDS
+                        } else {
+                            0
+                        };
+
+                        tx.execute(
+                            "UPDATE profiles
+                             SET pin_failures = ?3,
+                                 pin_locked_until = ?4
+                             WHERE id = ?1 AND account_id = ?2",
+                            params![profile_id.as_str(), account, next, next_lock,],
+                        )
+                        .map_err(storage)?;
+
+                        tx.commit().map_err(storage)?;
+
+                        return Err(NorylumError::Forbidden(
+                            "PIN incorrect ou verrouille".into(),
+                        ));
+                    }
+
+                    tx.execute(
+                        "UPDATE profiles
+                         SET pin_failures = 0,
+                             pin_locked_until = 0
+                         WHERE id = ?1 AND account_id = ?2",
+                        params![profile_id.as_str(), account],
+                    )
+                    .map_err(storage)?;
                 }
+                // Profil enfant sans PIN : acces direct (comportement inchange).
 
                 // Creation atomique apres verification des droits.
                 tx.execute(
@@ -422,12 +469,6 @@ mod tests {
 
         assert!(matches!(
             auth.set_profile_pin(&admin.access_token, &adult, "incorrect", PIN,)
-                .await,
-            Err(NorylumError::Forbidden(_))
-        ));
-
-        assert!(matches!(
-            auth.set_profile_pin(&admin.access_token, &child, PASSWORD, PIN,)
                 .await,
             Err(NorylumError::Forbidden(_))
         ));
@@ -513,6 +554,76 @@ mod tests {
             .await,
             Err(NorylumError::Forbidden(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn test_child_pin_lifecycle_and_lockout() {
+        let auth = AuthService::new(Database::in_memory().unwrap());
+        auth.bootstrap_admin("admin", PASSWORD).await.unwrap();
+        let admin = auth.login("admin", PASSWORD).await.unwrap();
+
+        let child = auth
+            .create_profile(&admin.account_id, "Junior", true, Some(8))
+            .await
+            .unwrap();
+
+        // Sans PIN : acces direct depuis un profil adulte.
+        let no_pin = auth
+            .switch_profile(&admin.access_token, &child)
+            .await
+            .unwrap();
+        assert_eq!(no_pin.profile_id, child);
+
+        // Pose du PIN enfant par le profil principal.
+        auth.set_profile_pin(&admin.access_token, &child, PASSWORD, PIN)
+            .await
+            .unwrap();
+
+        // Avec PIN : acces direct sans credentials refuse.
+        assert!(matches!(
+            auth.switch_profile(&admin.access_token, &child).await,
+            Err(NorylumError::Forbidden(_))
+        ));
+
+        // PIN correct : acces autorise.
+        let admitted = auth
+            .switch_profile_with_credentials(&admin.access_token, &child, None, Some(PIN))
+            .await
+            .unwrap();
+        assert_eq!(admitted.profile_id, child);
+
+        // PIN incorrect : verrouillage progressif.
+        for _ in 0..5 {
+            assert!(matches!(
+                auth.switch_profile_with_credentials(
+                    &admin.access_token,
+                    &child,
+                    None,
+                    Some("000000"),
+                )
+                .await,
+                Err(NorylumError::Forbidden(_))
+            ));
+        }
+
+        // PIN correct refuse pendant le verrouillage.
+        assert!(matches!(
+            auth.switch_profile_with_credentials(&admin.access_token, &child, None, Some(PIN))
+                .await,
+            Err(NorylumError::Forbidden(_))
+        ));
+
+        // Suppression du PIN enfant par le profil principal.
+        auth.delete_profile_pin(&admin.access_token, &child, PASSWORD)
+            .await
+            .unwrap();
+
+        // Sans PIN apres suppression : acces direct restaure.
+        let restored = auth
+            .switch_profile(&admin.access_token, &child)
+            .await
+            .unwrap();
+        assert_eq!(restored.profile_id, child);
     }
 
     #[tokio::test]

@@ -93,7 +93,6 @@ Les modules sont organisés par responsabilité afin de faciliter la maintenance
 ## 🚧 Développement en cours
 
 - Transcodage et streaming adaptatif (GPU : QSV, NVENC, VAAPI, VideoToolbox).
-- Codes PIN individuels pour profils enfants.
 - Cache local des affiches TMDB.
 
 Les modules présents dans le workspace ne sont pas tous entièrement implémentés. Ne pas exposer le serveur publiquement sans reverse proxy HTTPS.
