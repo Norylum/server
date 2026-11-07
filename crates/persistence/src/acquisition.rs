@@ -271,6 +271,36 @@ impl Database {
         .await
     }
 
+    /// Charge une demande par son identifiant et le token de bail actif.
+    /// Réservé au worker : ne nécessite pas l'account_id.
+    pub async fn find_acquisition_request_by_lease(
+        &self,
+        request_id: &str,
+        lease_token: &str,
+    ) -> Result<Option<AcquisitionRequest>, NorylumError> {
+        let id = request_id.to_owned();
+        let token = lease_token.to_owned();
+        let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+
+        self.with_connection(|conn| {
+            let query = format!(
+                "SELECT {COLUMNS} FROM acquisition_requests r
+                 WHERE r.id=?1
+                   AND EXISTS (
+                     SELECT 1 FROM acquisition_worker_leases l
+                     WHERE l.request_id=r.id
+                       AND l.lease_token=?2
+                       AND l.expires_at > ?3
+                   )"
+            );
+
+            conn.query_row(&query, params![id, token, now], map_request)
+                .optional()
+                .map_err(storage)
+        })
+        .await
+    }
+
     pub async fn get_acquisition_request(
         &self,
         account_id: &AccountId,

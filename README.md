@@ -46,6 +46,7 @@ server/
 │   └── norylum-server/        (server, seeder, metadata-tags, torrent-cleanup)
 ├── crates/
 │   ├── acquisition-transport/ (worker queue, source registry)
+│   ├── acquisition-providers/ (Provider trait, ProwlarrProvider)
 │   ├── api/
 │   ├── auth/
 │   ├── authorization/

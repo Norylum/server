@@ -18,6 +18,24 @@ Elles ne constituent pas des publications de versions stables.
 
 ## [Unreleased]
 
+### Acquisition V4 — Indexeurs et téléchargement BitTorrent
+
+- Nouvelle crate `crates/acquisition-providers` : trait `Provider` + `ProwlarrProvider`.
+  - `ProviderQuery { tmdb_id, kind, quality_profile, language }` → `Vec<ProviderResult>`.
+  - `ProwlarrProvider` interroge `GET /api/v1/search?query=tmdb:{id}&categories=…&limit=50` avec `X-Api-Key`.
+  - Configuration via `NORYLUM_PROWLARR_URL` + `NORYLUM_PROWLARR_KEY` dans `compose.yaml`.
+- Migration SQLite V4 (`acquisition_sources_v4_migration.sql`) : colonne `source_type TEXT NOT NULL DEFAULT 'https'` sur `acquisition_sources`. Idempotente (`let _` absorbe l'erreur si la colonne existe déjà).
+- Nouveaux accès `Database` dans `crates/persistence` :
+  - `claim_next_unsourced_acquisition()` : réserve la plus ancienne demande approuvée sans source.
+  - `register_torrent_source_via_lease()` : enregistre un magnet URI ou URL .torrent fencé par le token de bail.
+  - `find_acquisition_request_by_lease()` : charge une demande par son identifiant et le token de bail actif.
+  - `source_type` ajouté sur `AuthorizedAcquisitionSource`.
+- Worker V4 (`norylum-acquisition-worker`) réécrit avec deux chemins :
+  - **Auto-search** : `claim_next_unsourced_acquisition()` → `ProwlarrProvider::search()` → meilleur résultat (seeders max) → `register_torrent_source_via_lease()` → téléchargement BitTorrent.
+  - **Manuel (préenregistré)** : `claim_next_approved_acquisition()` → `source_for_acquisition_claim()` → HTTPS ou BitTorrent selon `source_type`.
+- Téléchargement BitTorrent via librqbit 9.0.1 : session isolée (`ipv4_only`, DHT optionnel, pas d'UPnP), sondage toutes les 15 s, renouvellement du bail toutes les 60 s, staging atomique + marqueur `.ready`.
+- Smoke test `--offline-smoke` : couvre les deux chemins (sourcé et non-sourcé) sans réseau ni fichier.
+
 ### Metadata V3 — Cache local des affiches TMDB
 
 - Nouveau `PosterCache` dans `crates/metadata/src/poster_cache.rs` : télécharge les affiches TMDB (w500) au moment où une association est posée et les stocke dans `media/.norylum-images/posters/`.

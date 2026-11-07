@@ -2127,6 +2127,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "38bf9645c8b145698bb0b18a4637dcacbc421ea49bef2317e4fd8065a387cf21"
 
 [[package]]
+name = "norylum-acquisition-providers"
+version = "0.1.0"
+dependencies = [
+ "norylum-foundation",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "norylum-acquisition-transport"
 version = "0.1.0"
 dependencies = [
@@ -2335,6 +2346,7 @@ dependencies = [
  "fs2",
  "http-body-util",
  "librqbit",
+ "norylum-acquisition-providers",
  "norylum-acquisition-transport",
  "norylum-api",
  "norylum-authorization",

@@ -157,6 +157,94 @@ impl Database {
         .await
     }
 
+    /// Réserve la plus ancienne demande approuvée sans source enregistrée.
+    /// Utilisé par le worker pour le chemin auto-search (Acquisition V4).
+    pub async fn claim_next_unsourced_acquisition(
+        &self,
+    ) -> Result<Option<AcquisitionLease>, NorylumError> {
+        let moment = Utc::now();
+        let now = timestamp(moment);
+        let until = timestamp(moment + Duration::seconds(LEASE_SECONDS));
+
+        self.with_connection(|conn| {
+            let tx = conn
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(storage)?;
+
+            recover_expired(&tx, &now)?;
+
+            let id: Option<String> = tx
+                .query_row(
+                    "SELECT r.id FROM acquisition_requests r
+                     WHERE r.status='approved'
+                       AND NOT EXISTS (
+                         SELECT 1 FROM acquisition_sources s
+                         WHERE s.request_id=r.id
+                       )
+                     ORDER BY r.created_at ASC, r.id ASC
+                     LIMIT 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .optional()
+                .map_err(storage)?;
+
+            let Some(id) = id else {
+                tx.commit().map_err(storage)?;
+                return Ok(None);
+            };
+
+            let token = uuid::Uuid::new_v4().to_string();
+
+            tx.execute(
+                "INSERT INTO acquisition_worker_leases
+                 (request_id,lease_token,expires_at,attempt_count,updated_at)
+                 VALUES (?1,?2,?3,1,?4)
+                 ON CONFLICT(request_id) DO UPDATE SET
+                   lease_token=excluded.lease_token,
+                   expires_at=excluded.expires_at,
+                   attempt_count=acquisition_worker_leases.attempt_count+1,
+                   updated_at=excluded.updated_at",
+                params![&id, &token, &until, &now],
+            )
+            .map_err(storage)?;
+
+            let changed = tx
+                .execute(
+                    "UPDATE acquisition_requests
+                     SET status='searching', updated_at=?2
+                     WHERE id=?1 AND status='approved'",
+                    params![&id, &now],
+                )
+                .map_err(storage)?;
+
+            if changed != 1 {
+                return Err(NorylumError::Conflict(
+                    "Reservation concurrente refusee".into(),
+                ));
+            }
+
+            let attempt: i64 = tx
+                .query_row(
+                    "SELECT attempt_count
+                     FROM acquisition_worker_leases
+                     WHERE request_id=?1",
+                    params![&id],
+                    |row| row.get(0),
+                )
+                .map_err(storage)?;
+
+            tx.commit().map_err(storage)?;
+
+            Ok(Some(AcquisitionLease {
+                request_id: id,
+                lease_token: token,
+                attempt,
+            }))
+        })
+        .await
+    }
+
     /// Extends only a live lease with the correct token.
     pub async fn renew_acquisition_claim(
         &self,

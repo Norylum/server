@@ -317,6 +317,9 @@ impl Database {
         conn.execute_batch(include_str!("acquisition_sources_migration.sql"))
             .map_err(|e| NorylumError::Internal(format!("Migration Acquisition Sources : {e}")))?;
 
+        // Migration additive V4 : ajout source_type. SQLite ignore les colonnes deja presentes.
+        let _ = conn.execute_batch(include_str!("acquisition_sources_v4_migration.sql"));
+
         conn.execute_batch(include_str!("torrent_migration.sql"))
             .map_err(|e| NorylumError::Internal(format!("Migration Torrent V2 : {e}")))?;
 

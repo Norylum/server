@@ -11,6 +11,9 @@ pub struct AuthorizedAcquisitionSource {
     pub request_id: String,
     pub source_url: String,
     pub expected_sha256: String,
+    /// `"https"` ou `"torrent"`. Pour les sources torrent, `source_url` est un magnet URI
+    /// ou une URL .torrent, et `expected_sha256` est un placeholder non vérifié.
+    pub source_type: String,
 }
 
 fn storage(error: impl std::fmt::Display) -> NorylumError {
@@ -174,7 +177,8 @@ impl Database {
 
         self.with_connection(|conn| {
             conn.query_row(
-                "SELECT s.request_id, s.source_url, s.expected_sha256
+                "SELECT s.request_id, s.source_url, s.expected_sha256,
+                        COALESCE(s.source_type, 'https')
                  FROM acquisition_sources s
                  JOIN acquisition_requests r ON r.id=s.request_id
                  JOIN acquisition_worker_leases l ON l.request_id=s.request_id
@@ -188,11 +192,83 @@ impl Database {
                         request_id: row.get(0)?,
                         source_url: row.get(1)?,
                         expected_sha256: row.get(2)?,
+                        source_type: row.get(3)?,
                     })
                 },
             )
             .optional()
             .map_err(storage)
+        })
+        .await
+    }
+
+    /// Enregistre une source BitTorrent (magnet URI ou URL .torrent) pour un bail actif.
+    /// Réservé au worker : fencé par le token de bail.
+    pub async fn register_torrent_source_via_lease(
+        &self,
+        lease: &AcquisitionLease,
+        url: &str,
+    ) -> Result<(), NorylumError> {
+        if !url.starts_with("magnet:") && !url.starts_with("https://") {
+            return Err(NorylumError::Validation(
+                "Source torrent invalide : magnet: ou https:// requis".into(),
+            ));
+        }
+
+        if url.len() > 4096 {
+            return Err(NorylumError::Validation("Source torrent trop longue".into()));
+        }
+
+        let id = lease.request_id.clone();
+        let token = lease.lease_token.clone();
+        let url = url.to_owned();
+        let now = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+        // SHA-256 placeholder pour les sources torrent (l'intégrité est garantie par l'infohash).
+        let placeholder = "0".repeat(64);
+
+        self.with_connection(|conn| {
+            let tx = conn
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(storage)?;
+
+            // Vérifie que le bail est actif.
+            let valid: i64 = tx
+                .query_row(
+                    "SELECT COUNT(*) FROM acquisition_worker_leases l
+                     JOIN acquisition_requests r ON r.id=l.request_id
+                     WHERE l.request_id=?1
+                       AND l.lease_token=?2
+                       AND l.expires_at > ?3
+                       AND r.status='searching'",
+                    params![&id, &token, &now],
+                    |row| row.get(0),
+                )
+                .map_err(storage)?;
+
+            if valid == 0 {
+                return Err(NorylumError::Conflict(
+                    "Bail expiré ou invalide".into(),
+                ));
+            }
+
+            let changed = tx
+                .execute(
+                    "INSERT INTO acquisition_sources
+                     (request_id, source_url, expected_sha256, registered_at, source_type)
+                     VALUES (?1,?2,?3,?4,'torrent')
+                     ON CONFLICT DO NOTHING",
+                    params![&id, &url, &placeholder, &now],
+                )
+                .map_err(storage)?;
+
+            if changed != 1 {
+                return Err(NorylumError::Conflict(
+                    "Une source est déjà enregistrée".into(),
+                ));
+            }
+
+            tx.commit().map_err(storage)?;
+            Ok(())
         })
         .await
     }

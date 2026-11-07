@@ -130,6 +130,8 @@ services:
     environment:
       NORYLUM_MEDIA_DIR: /data/media
       RUST_LOG: ${NORYLUM_RUST_LOG:-info}
+      NORYLUM_PROWLARR_URL: ${NORYLUM_PROWLARR_URL:-}
+      NORYLUM_PROWLARR_KEY: ${NORYLUM_PROWLARR_KEY:-}
     volumes:
       - ./media:/data/media
 

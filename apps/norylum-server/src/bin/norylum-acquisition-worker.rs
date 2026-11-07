@@ -1,14 +1,22 @@
-//! Acquisition worker: offline smoke test and VPN-gated HTTPS download.
+//! Acquisition worker V4 : offline smoke test, auto-search via providers, et téléchargement
+//! HTTPS ou BitTorrent sous VPN Gluetun.
 
+use librqbit::{
+    limits::LimitsConfig, AddTorrent, AddTorrentOptions, ListenerOptions, Session, SessionOptions,
+};
+use norylum_acquisition_providers::{Provider, ProviderQuery, ProwlarrProvider, SourceType};
 use norylum_acquisition_transport::download_https;
 use norylum_foundation::{AccountId, ProfileId};
-use norylum_persistence::Database;
+use norylum_persistence::{AcquisitionLease, Database};
 use reqwest::Url;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 const GLUETUN_STATUS_API: &str = "http://127.0.0.1:8000/v1/vpn/status";
 const RENEWAL_INTERVAL_SECS: u64 = 60;
+const TORRENT_POLL_SECS: u64 = 15;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -69,6 +77,25 @@ async fn run_smoke() -> Result<(), Box<dyn std::error::Error>> {
 
     assert_eq!(finished.status, "unavailable");
 
+    // Smoke test du chemin auto-search (sans providers réels).
+    let request2 = db
+        .request_acquisition(
+            &account, &profile, "movie", 987650104, None, None, "1080p", "fr",
+        )
+        .await?;
+    db.approve_acquisition_request(&account, &request2.id).await?;
+
+    let unsourced_lease = db.claim_next_unsourced_acquisition().await?
+        .ok_or("Aucune reservation non-sourcee")?;
+    assert_eq!(unsourced_lease.request_id, request2.id);
+
+    db.register_torrent_source_via_lease(
+        &unsourced_lease,
+        "magnet:?xt=urn:btih:aabbccdd00112233aabbccdd00112233aabbccdd",
+    ).await?;
+
+    db.finish_acquisition_claim(&unsourced_lease, "failed").await?;
+
     println!("OK : worker hors reseau, reservation et cloture SQLite validees");
     println!("Aucun fichier media ni telechargement n'a ete cree.");
 
@@ -91,15 +118,99 @@ async fn run_acquisition() -> Result<(), Box<dyn std::error::Error>> {
     let quarantine = media_dir.join(".norylum-acq-quarantine");
     prepare_quarantine(&quarantine)?;
 
-    // 4. Claim the oldest approved request that has an authorized source.
+    // 4. Try the auto-search path first if Prowlarr is configured.
+    let prowlarr = ProwlarrProvider::from_env();
+    if let Some(provider) = prowlarr {
+        if try_auto_search(&db, &provider, &media_dir, &quarantine).await? {
+            return Ok(());
+        }
+    }
+
+    // 5. Fall back to the manual-source path (HTTPS or pre-registered torrent).
+    try_sourced(&db, &media_dir, &quarantine).await
+}
+
+/// Auto-search path: claim an unsourced request, query providers, register + download.
+/// Returns true if work was found and processed (success or failure).
+async fn try_auto_search(
+    db: &Database,
+    provider: &impl Provider,
+    media_dir: &Path,
+    quarantine: &Path,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    let Some(lease) = db.claim_next_unsourced_acquisition().await? else {
+        return Ok(false);
+    };
+
+    println!("Acquisition non-sourcee reservee : {}", lease.request_id);
+
+    // Load request details to build the provider query.
+    let req = match find_request_for_lease(db, &lease).await? {
+        Some(r) => r,
+        None => {
+            eprintln!("ERREUR : demande {} introuvable", lease.request_id);
+            let _ = db.finish_acquisition_claim(&lease, "failed").await;
+            return Ok(true);
+        }
+    };
+
+    let query = ProviderQuery {
+        tmdb_id: req.tmdb_id,
+        kind: req.kind.clone(),
+        quality_profile: req.quality_profile.clone(),
+        language: req.language.clone(),
+    };
+
+    let results = provider.search(query).await;
+
+    // Pick best result: most seeders first, then first found.
+    let best = results
+        .into_iter()
+        .max_by_key(|r| r.seeders.unwrap_or(0));
+
+    let Some(result) = best else {
+        eprintln!("Aucun résultat fournisseur pour {}", lease.request_id);
+        let _ = db.finish_acquisition_claim(&lease, "unavailable").await;
+        return Ok(true);
+    };
+
+    println!("Source trouvée : {} ({})", result.title, result.url);
+
+    // Register the found source under the active lease.
+    if let Err(e) = db.register_torrent_source_via_lease(&lease, &result.url).await {
+        eprintln!("ERREUR enregistrement source : {e}");
+        let _ = db.finish_acquisition_claim(&lease, "failed").await;
+        return Ok(true);
+    }
+
+    // Download based on source type.
+    match result.source_type {
+        SourceType::Torrent => {
+            download_and_stage_torrent(db, &lease, &result.url, media_dir, quarantine).await?;
+        }
+        SourceType::Https => {
+            // HTTPS from provider: sha256 not available, mark unavailable.
+            eprintln!("HTTPS depuis fournisseur sans SHA-256 : non supporté, marquer unavailable");
+            let _ = db.finish_acquisition_claim(&lease, "unavailable").await;
+        }
+    }
+
+    Ok(true)
+}
+
+/// Manual-source path: claim a request with an already-registered source and download it.
+async fn try_sourced(
+    db: &Database,
+    media_dir: &Path,
+    quarantine: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
     let Some(lease) = db.claim_next_approved_acquisition().await? else {
         println!("OK : aucune acquisition en attente");
         return Ok(());
     };
 
-    println!("Acquisition reservee : {}", lease.request_id);
+    println!("Acquisition sourcée reservee : {}", lease.request_id);
 
-    // 5. Retrieve the source record (requires a live lease).
     let source = match db.source_for_acquisition_claim(&lease).await? {
         Some(s) => s,
         None => {
@@ -109,74 +220,204 @@ async fn run_acquisition() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    // 6. Allowed host derived from the already-validated source URL.
+    if source.source_type == "torrent" {
+        download_and_stage_torrent(db, &lease, &source.source_url, media_dir, quarantine).await
+    } else {
+        download_and_stage_https(db, &lease, &source, media_dir, quarantine).await
+    }
+}
+
+/// HTTPS download path (unchanged from V3.3).
+async fn download_and_stage_https(
+    db: &Database,
+    lease: &AcquisitionLease,
+    source: &norylum_persistence::AuthorizedAcquisitionSource,
+    media_dir: &Path,
+    quarantine: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
     let host = Url::parse(&source.source_url)
         .ok()
         .and_then(|u| u.host_str().map(str::to_owned))
         .ok_or("URL de source sans domaine")?;
     let allowed_hosts = vec![host];
-
-    // 7. Determine the filename for the staging directory.
     let staging_name = derive_staging_name(&source.source_url);
     let staging_dir = media_dir.join(".norylum-staging");
 
-    // 8. Renew the lease every 60 s while downloading (lease TTL is 90 s).
     let db_renew = db.clone();
     let lease_renew = lease.clone();
     let renewal = tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(RENEWAL_INTERVAL_SECS));
-        interval.tick().await; // discard the immediate first tick
+        interval.tick().await;
         loop {
             interval.tick().await;
-            if db_renew
-                .renew_acquisition_claim(&lease_renew)
-                .await
-                .is_err()
-            {
+            if db_renew.renew_acquisition_claim(&lease_renew).await.is_err() {
                 eprintln!("ATTENTION : renouvellement du bail echoue, abandon");
                 break;
             }
         }
     });
 
-    // 9. Download with SSRF protection and streaming SHA-256 verification.
-    let download_result = download_https(&source, &allowed_hosts, &quarantine).await;
-
+    let download_result = download_https(source, &allowed_hosts, quarantine).await;
     renewal.abort();
     let _ = renewal.await;
 
     let artifact = match download_result {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("ERREUR telechargement : {e}");
-            let _ = db.finish_acquisition_claim(&lease, "failed").await;
+            eprintln!("ERREUR telechargement HTTPS : {e}");
+            let _ = db.finish_acquisition_claim(lease, "failed").await;
             return Ok(());
         }
     };
 
-    println!(
-        "Telechargement OK : {} octets, SHA-256 verifie",
-        artifact.bytes()
-    );
+    println!("Téléchargement HTTPS OK : {} octets, SHA-256 vérifié", artifact.bytes());
 
-    // 10. Rename artifact into staging atomically and create the .ready marker.
     if let Err(e) = stage_artifact(artifact.path(), &staging_dir, &staging_name) {
         eprintln!("ERREUR staging : {e}");
-        let _ = db.finish_acquisition_claim(&lease, "failed").await;
+        let _ = db.finish_acquisition_claim(lease, "failed").await;
         return Ok(());
     }
 
     println!("Staged : {staging_name}");
+    db.finish_acquisition_claim(lease, "available").await?;
+    println!("OK : acquisition {} disponible pour indexation automatique", lease.request_id);
+    Ok(())
+}
 
-    // 11. Mark the acquisition as available for the ingestion pipeline.
-    db.finish_acquisition_claim(&lease, "available").await?;
+/// BitTorrent download path via librqbit.
+async fn download_and_stage_torrent(
+    db: &Database,
+    lease: &AcquisitionLease,
+    magnet_or_url: &str,
+    media_dir: &Path,
+    quarantine: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let staging_dir = media_dir.join(".norylum-staging");
 
+    let session = Arc::new(
+        Session::new_with_opts(
+            quarantine.to_path_buf(),
+            SessionOptions {
+                ipv4_only: true,
+                disable_local_service_discovery: true,
+                peer_limit: Some(50),
+                ratelimits: LimitsConfig {
+                    upload_bps: None,
+                    download_bps: None,
+                },
+                listen: Some(ListenerOptions {
+                    listen_addr: SocketAddr::from(([0, 0, 0, 0], 6882)),
+                    enable_upnp_port_forwarding: false,
+                    ipv4_only: true,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        )
+        .await?,
+    );
+
+    let response = session
+        .add_torrent(
+            AddTorrent::from_url(magnet_or_url),
+            Some(AddTorrentOptions {
+                output_folder: Some(quarantine.to_string_lossy().to_string()),
+                ..Default::default()
+            }),
+        )
+        .await?;
+
+    let handle = response
+        .into_handle()
+        .ok_or("Impossible d'obtenir un handle de torrent")?;
+
+    println!("Torrent démarré : {magnet_or_url}");
+
+    // Poll until finished, renewing lease every 60 s.
+    let mut lease_timer = tokio::time::interval(Duration::from_secs(RENEWAL_INTERVAL_SECS));
+    lease_timer.tick().await; // discard immediate tick
+
+    loop {
+        tokio::select! {
+            _ = tokio::time::sleep(Duration::from_secs(TORRENT_POLL_SECS)) => {
+                let stats = handle.stats();
+
+                if let Some(err) = stats.error.as_deref() {
+                    eprintln!("ERREUR torrent : {err}");
+                    let _ = db.finish_acquisition_claim(lease, "failed").await;
+                    session.stop().await;
+                    return Ok(());
+                }
+
+                if stats.finished {
+                    println!(
+                        "Téléchargement torrent OK : {} octets",
+                        stats.progress_bytes
+                    );
+                    break;
+                }
+
+                println!("Torrent en cours : {stats}");
+            }
+            _ = lease_timer.tick() => {
+                if db.renew_acquisition_claim(lease).await.is_err() {
+                    eprintln!("ATTENTION : renouvellement du bail echoue, abandon torrent");
+                    session.stop().await;
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    session.stop().await;
+
+    // Find the largest downloaded file in quarantine as the media file.
+    let staged_file = find_largest_file(quarantine)?;
+    let staging_name = staged_file
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or("Nom de fichier torrent invalide")?
+        .to_owned();
+
+    // Validate extension.
+    let lower = staging_name.to_ascii_lowercase();
+    if !lower.ends_with(".mkv") && !lower.ends_with(".mp4") && !lower.ends_with(".m4v") {
+        eprintln!("ERREUR : extension non supportée : {staging_name}");
+        let _ = db.finish_acquisition_claim(lease, "failed").await;
+        return Ok(());
+    }
+
+    if let Err(e) = stage_artifact(&staged_file, &staging_dir, &staging_name) {
+        eprintln!("ERREUR staging torrent : {e}");
+        let _ = db.finish_acquisition_claim(lease, "failed").await;
+        return Ok(());
+    }
+
+    println!("Staged : {staging_name}");
+    db.finish_acquisition_claim(lease, "available").await?;
     println!(
         "OK : acquisition {} disponible pour indexation automatique",
         lease.request_id
     );
-
     Ok(())
+}
+
+/// Charge les détails d'une demande pour construire la requête fournisseur.
+async fn find_request_for_lease(
+    db: &Database,
+    lease: &AcquisitionLease,
+) -> Result<Option<norylum_persistence::AcquisitionRequest>, Box<dyn std::error::Error>> {
+    // On récupère toutes les demandes du système pour trouver celle qui correspond au bail.
+    // Le bail ne stocke pas le account_id, on doit l'inférer via SQL direct.
+    let id = lease.request_id.clone();
+    let token = lease.lease_token.clone();
+
+    let req = db
+        .find_acquisition_request_by_lease(&id, &token)
+        .await
+        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+
+    Ok(req)
 }
 
 async fn check_vpn() -> Result<(), Box<dyn std::error::Error>> {
@@ -241,10 +482,7 @@ fn stage_artifact(
         .into());
     }
 
-    // Atomic on the same filesystem (quarantine and staging are both under media/).
     std::fs::rename(source, &target)?;
-
-    // The VerifiedArtifact Drop will silently fail to remove the renamed path.
 
     let ready = staging_dir.join(format!("{name}.ready"));
     std::fs::File::create(&ready)
@@ -271,8 +509,23 @@ fn derive_staging_name(url: &str) -> String {
         }
     }
 
-    format!(
-        "norylum-acq-{}.mp4",
-        uuid::Uuid::new_v4().as_simple()
-    )
+    format!("norylum-acq-{}.mp4", uuid::Uuid::new_v4().as_simple())
+}
+
+fn find_largest_file(dir: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let mut best: Option<(u64, PathBuf)> = None;
+
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let meta = entry.metadata()?;
+        if meta.is_file() {
+            let size = meta.len();
+            if best.as_ref().is_none_or(|(s, _)| size > *s) {
+                best = Some((size, entry.path()));
+            }
+        }
+    }
+
+    best.map(|(_, p)| p)
+        .ok_or_else(|| "Aucun fichier dans le répertoire quarantaine".into())
 }
