@@ -19,6 +19,7 @@ async fn ready_requires_auth_principal_and_valid_paths() {
         Arc::new(CatalogService::new(db.clone())),
         Arc::new(DefaultAuthorizer::new()),
         Arc::new(PlaybackService::new(db)),
+        norylum_transcoding::HwAccel::Software,
     );
     let auth = state.auth.clone();
     auth.bootstrap_admin("admin", "ingestion-test-password-2026")

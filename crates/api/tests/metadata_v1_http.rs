@@ -122,6 +122,7 @@ async fn test_metadata_cached_and_profile_isolation() {
         Arc::new(CatalogService::new(db.clone())),
         Arc::new(DefaultAuthorizer::new()),
         Arc::new(PlaybackService::new(db)),
+        norylum_transcoding::HwAccel::Software,
     );
 
     let auth = state.auth.clone();

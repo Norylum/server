@@ -54,6 +54,7 @@ async fn test_profiles_v2_http_security() {
         Arc::new(CatalogService::in_memory()),
         Arc::new(DefaultAuthorizer::new()),
         Arc::new(PlaybackService::in_memory()),
+            norylum_transcoding::HwAccel::Software,
     );
 
     let auth = state.auth.clone();

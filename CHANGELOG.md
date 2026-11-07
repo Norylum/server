@@ -18,6 +18,23 @@ Elles ne constituent pas des publications de versions stables.
 
 ## [Unreleased]
 
+### Streaming V2 — Transcodage adaptatif avec accélération GPU
+
+- Nouvelle crate `crates/transcoding` : détection automatique de l'accélérateur GPU au démarrage.
+  - Ordre de préférence : QSV (Intel) → NVENC (NVIDIA) → VAAPI (Linux) → VideoToolbox (macOS) → logiciel (libx264).
+  - `detect_hw_accel()` : teste chaque encodeur via un encode nul de 0,1 s avec ffmpeg.
+  - `spawn_transcode(TranscodeRequest)` : lance ffmpeg, retourne un `Child` avec stdout = flux fMP4 fragmenté.
+  - `kill_on_drop(true)` : ffmpeg est tué automatiquement si le client se déconnecte.
+- `AppState` enrichi du champ `hw_accel: HwAccel` (détecté une fois au démarrage, partagé par clonage).
+- Nouveau handler `GET /v1/media/:id/transcode?start=0&height=1080` (protégé, authentification requise) :
+  - **Direct Play automatique** : si le codec est déjà H.264 + AAC/MP3/Opus et `start=0` → redirect 302 vers `/v1/media/:id` (pas de transcodage).
+  - **Transcode à la volée** : sinon, pipe ffmpeg vers le client en fragmented MP4 (`Content-Type: video/mp4`, `Cache-Control: no-store`).
+  - Hauteurs acceptées : 2160, 1080, 720, 480, 360 (défaut 1080).
+  - En-tête `X-Transcode-Accel` indique l'accélérateur utilisé.
+- Validation de sécurité SSRF renforcée dans le worker Acquisition V4 (fix commit précédent) :
+  - Les URLs HTTPS `.torrent` sont téléchargées par notre propre client reqwest (DNS pré-résolu + IP pinnée), jamais par librqbit directement.
+  - Validation de toutes les IPs résolues (loopback, RFC1918, link-local, ULA fd00::/8) avant tout téléchargement.
+
 ### Acquisition V4 — Indexeurs et téléchargement BitTorrent
 
 - Nouvelle crate `crates/acquisition-providers` : trait `Provider` + `ProwlarrProvider`.

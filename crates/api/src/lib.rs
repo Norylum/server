@@ -28,7 +28,10 @@ use norylum_library::{IngestionService, MediaItem, MediaScanner};
 use norylum_metadata::{PosterCache, TmdbClient};
 use norylum_playback::PlaybackService;
 use norylum_profiles::ProfileService;
+use axum::extract::Query;
 use norylum_streaming::StreamingState;
+use norylum_transcoding::{HwAccel, TranscodeRequest};
+use tokio_util::io::ReaderStream;
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -80,6 +83,8 @@ pub struct AppState {
     pub auth: Arc<AuthService>,
     pub devices: Arc<DeviceService>,
     pub profiles: Arc<ProfileService>,
+    /// Accélérateur GPU détecté au démarrage. Partagé avec le handler de transcodage.
+    pub hw_accel: HwAccel,
 }
 
 impl AppState {
@@ -88,6 +93,7 @@ impl AppState {
         catalog: Arc<CatalogService>,
         authorizer: Arc<dyn Authorizer>,
         playback: Arc<PlaybackService>,
+        hw_accel: HwAccel,
     ) -> Self {
         let scanner = Arc::new(MediaScanner::new(library_root.clone()));
         let ingestion = Arc::new(IngestionService::new(library_root.clone()));
@@ -105,6 +111,7 @@ impl AppState {
             auth,
             devices,
             profiles,
+            hw_accel,
         }
     }
 }
@@ -230,6 +237,118 @@ pub async fn get_library_season_handler(
     Ok(Json(season_details))
 }
 
+/// Paramètres de la requête de transcodage.
+#[derive(serde::Deserialize, Default)]
+pub struct TranscodeQuery {
+    /// Position de départ en secondes (défaut : 0).
+    #[serde(default)]
+    pub start: f64,
+    /// Hauteur cible en pixels (défaut : 1080). Valeurs acceptées : 2160, 1080, 720, 480, 360.
+    #[serde(default = "default_height")]
+    pub height: u32,
+}
+
+fn default_height() -> u32 { 1080 }
+
+/// GET /v1/media/:media_id/transcode?start=0&height=1080
+///
+/// Stratégie Direct Play / Transcode :
+/// - Si le média est déjà H.264+AAC (ou H.264+MP3/Opus) → redirect 302 vers `/v1/media/:id`
+///   (Direct Play sans transcodage).
+/// - Sinon → lance ffmpeg et streame un fragmented MP4 en direct.
+pub async fn transcode_media_handler(
+    State(state): State<AppState>,
+    Path(media_id): Path<norylum_foundation::MediaId>,
+    Query(params): Query<TranscodeQuery>,
+    headers: HeaderMap,
+) -> Result<Response, NorylumError> {
+    use axum::http::{header::LOCATION, StatusCode};
+
+    let ctx = norylum_streaming::extract_request_context_from_headers(&headers);
+    state.authorizer.authorize_request(&ctx).await?;
+
+    let media = state
+        .catalog
+        .get_by_id(&media_id)
+        .await
+        .ok_or_else(|| NorylumError::NotFound(format!("Média '{}' introuvable", media_id)))?;
+
+    let access_info = norylum_authorization::MediaAccessInfo::new(
+        media.id.clone(),
+        media.is_child_safe,
+        media.age_rating,
+    );
+    state.authorizer.authorize_media_access(&ctx, &access_info).await?;
+
+    // Direct Play si le codec vidéo est déjà H.264 et l'audio compatible navigateur.
+    let is_direct_play = media.video_codec.as_deref() == Some("h264")
+        && matches!(
+            media.audio_codec.as_deref(),
+            Some("aac") | Some("mp3") | Some("opus")
+        );
+
+    if is_direct_play && params.start == 0.0 {
+        let location = format!("/v1/media/{}", media_id);
+        return Ok(Response::builder()
+            .status(StatusCode::FOUND)
+            .header(LOCATION, location)
+            .body(Body::empty())
+            .map_err(|e| NorylumError::Internal(e.to_string()))?);
+    }
+
+    // Validation de la hauteur cible.
+    let target_height = match params.height {
+        h if [2160, 1080, 720, 480, 360].contains(&h) => h,
+        _ => 1080,
+    };
+
+    let safe_path = norylum_library::PathSanitizer::sanitize_path(
+        &state.library_root,
+        &media.file_path,
+    )?;
+
+    let req = TranscodeRequest {
+        input: &safe_path,
+        start_secs: params.start.max(0.0),
+        accel: state.hw_accel,
+        target_height,
+    };
+
+    let mut child = norylum_transcoding::spawn_transcode(&req)
+        .map_err(|e| NorylumError::Internal(format!("Lancement ffmpeg échoué : {e}")))?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| NorylumError::Internal("ffmpeg stdout manquant".into()))?;
+
+    // Le stream se termine naturellement quand ffmpeg finit ou quand le client se déconnecte.
+    // `kill_on_drop(true)` sur le Child garantit que ffmpeg est tué si le stream est abandonné.
+    let stream = ReaderStream::with_capacity(stdout, 64 * 1024);
+    let body = Body::from_stream(stream);
+
+    // Garder le child en vie jusqu'à la fin du stream via un task dédié.
+    tokio::spawn(async move {
+        let _ = child.wait().await;
+    });
+
+    tracing::info!(
+        media_id = %media_id,
+        accel = state.hw_accel.as_str(),
+        start = params.start,
+        height = target_height,
+        "Transcodage démarré"
+    );
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "video/mp4")
+        .header("Cache-Control", "no-store")
+        .header("X-Transcode-Accel", state.hw_accel.as_str())
+        .body(body)
+        .map_err(|e| NorylumError::Internal(e.to_string()))
+}
+
 /// Construit et configure le routeur Axum pour Norylum Server.
 pub fn create_router(state: AppState) -> Router {
     let auth = state.auth.clone();
@@ -349,7 +468,7 @@ pub fn create_router(state: AppState) -> Router {
             "/shows/:show_id/seasons/:season_number",
             axum::routing::get(get_library_season_handler),
         )
-        .with_state(state);
+        .with_state(state.clone());
 
     let streaming_routes = Router::new()
         .route(
@@ -357,6 +476,13 @@ pub fn create_router(state: AppState) -> Router {
             axum::routing::get(norylum_streaming::stream_media_handler),
         )
         .with_state(streaming_state);
+
+    let transcode_routes = Router::new()
+        .route(
+            "/:media_id/transcode",
+            axum::routing::get(transcode_media_handler),
+        )
+        .with_state(state);
 
     let playback_routes = Router::new()
         .route(
@@ -390,6 +516,7 @@ pub fn create_router(state: AppState) -> Router {
         .nest("/v1/acquisition", acquisition_routes)
         .nest("/v1/torrent", torrent_routes)
         .nest("/v1/media", streaming_routes)
+        .nest("/v1/media", transcode_routes)
         .nest("/v1/playback", playback_routes)
         .nest("/v1/metadata", metadata_routes)
         .route(
@@ -502,6 +629,7 @@ mod tests {
             Arc::new(CatalogService::in_memory()),
             Arc::new(DefaultAuthorizer::new()),
             Arc::new(PlaybackService::in_memory()),
+            HwAccel::Software,
         );
 
         let app = create_router(state);
@@ -523,6 +651,7 @@ mod tests {
             Arc::new(CatalogService::in_memory()),
             Arc::new(DefaultAuthorizer::new()),
             Arc::new(PlaybackService::in_memory()),
+            HwAccel::Software,
         );
 
         let app = create_router(state);

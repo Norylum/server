@@ -19,6 +19,7 @@ members = [
     "crates/persistence",
     "crates/acquisition-transport",
     "crates/acquisition-providers",
+    "crates/transcoding",
     "shared/api-types",
     "shared/test-support",
 ]

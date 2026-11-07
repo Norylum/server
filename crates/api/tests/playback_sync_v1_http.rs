@@ -82,6 +82,7 @@ async fn test_cross_device_resume_and_conflicts() {
         catalog,
         Arc::new(DefaultAuthorizer::new()),
         playback,
+        norylum_transcoding::HwAccel::Software,
     );
 
     let auth = state.auth.clone();

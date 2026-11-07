@@ -54,6 +54,7 @@ async fn acquisition_requires_principal_and_is_deduplicated() {
         Arc::new(CatalogService::new(db.clone())),
         Arc::new(DefaultAuthorizer::new()),
         Arc::new(PlaybackService::new(db)),
+        norylum_transcoding::HwAccel::Software,
     );
 
     let auth = state.auth.clone();
@@ -190,6 +191,7 @@ async fn acquisition_v2_approval_and_cancellation() {
         Arc::new(CatalogService::new(db.clone())),
         Arc::new(DefaultAuthorizer::new()),
         Arc::new(PlaybackService::new(db)),
+        norylum_transcoding::HwAccel::Software,
     );
 
     let auth = state.auth.clone();

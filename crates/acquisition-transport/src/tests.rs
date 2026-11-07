@@ -20,6 +20,7 @@ fn fixture(url: &str) -> AuthorizedAcquisitionSource {
         request_id: "acq_test".to_owned(),
         source_url: url.to_owned(),
         expected_sha256: "a".repeat(64),
+        source_type: "https".to_owned(),
     }
 }
 

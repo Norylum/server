@@ -2165,9 +2165,11 @@ dependencies = [
  "norylum-playback",
  "norylum-profiles",
  "norylum-streaming",
+ "norylum-transcoding",
  "serde",
  "serde_json",
  "tokio",
+ "tokio-util",
  "tower",
  "tracing",
 ]
@@ -2358,6 +2360,7 @@ dependencies = [
  "norylum-playback",
  "norylum-streaming",
  "norylum-torrent",
+ "norylum-transcoding",
  "reqwest 0.12.28",
  "rusqlite",
  "serde_json",
@@ -2403,6 +2406,15 @@ dependencies = [
  "norylum-library",
  "sha2",
  "uuid",
+]
+
+[[package]]
+name = "norylum-transcoding"
+version = "0.1.0"
+dependencies = [
+ "norylum-foundation",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

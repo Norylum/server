@@ -16,7 +16,9 @@ norylum-streaming = { path = "../streaming" }
 norylum-playback = { path = "../playback" }
 norylum-persistence = { path = "../persistence" }
 norylum-metadata = { path = "../metadata" }
+norylum-transcoding = { path = "../transcoding" }
 axum.workspace = true
+tokio-util.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true

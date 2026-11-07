@@ -47,6 +47,7 @@ async fn torrent_control_is_principal_only() {
         Arc::new(CatalogService::new(db.clone())),
         Arc::new(DefaultAuthorizer::new()),
         Arc::new(PlaybackService::new(db)),
+        norylum_transcoding::HwAccel::Software,
     );
 
     let auth = state.auth.clone();

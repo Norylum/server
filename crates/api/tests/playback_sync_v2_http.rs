@@ -79,6 +79,7 @@ async fn test_retry_conflict_history_and_child_access() {
         Arc::new(CatalogService::new(db.clone())),
         Arc::new(DefaultAuthorizer::new()),
         Arc::new(PlaybackService::new(db)),
+        norylum_transcoding::HwAccel::Software,
     );
 
     let auth = state.auth.clone();

@@ -284,6 +284,95 @@ async fn download_and_stage_https(
     Ok(())
 }
 
+/// Vérifie qu'une IP résolue ne pointe pas vers une ressource interne.
+fn is_blocked_ip(ip: std::net::IpAddr) -> bool {
+    ip.is_loopback()
+        || ip.is_unspecified()
+        || ip.is_multicast()
+        || matches!(ip, std::net::IpAddr::V4(v4) if
+            v4.is_private() || v4.is_link_local() || v4.is_broadcast()
+            // 100.64/10 (CGNAT), 169.254/16 (link-local) déjà couverts ci-dessus
+        )
+        || matches!(ip, std::net::IpAddr::V6(v6) if
+            v6.is_unicast_link_local()
+            // fd00::/8 (ULA private) — préfixe 0xFD
+            || (v6.octets()[0] == 0xfd)
+        )
+}
+
+/// Pour les URLs HTTPS .torrent : télécharge le fichier nous-mêmes avec DNS pré-résolu et
+/// IP pinnée (protège contre le rebinding DNS), puis retourne les bytes.
+/// Pour les magnet URIs : retourne None — librqbit les gère sans requête HTTP directe.
+async fn resolve_torrent_add(
+    url: &str,
+) -> Result<AddTorrent<'static>, Box<dyn std::error::Error>> {
+    if url.starts_with("magnet:") {
+        return Ok(AddTorrent::from_url(url.to_owned()));
+    }
+
+    let parsed = Url::parse(url).map_err(|_| "URL torrent mal formée")?;
+
+    if parsed.scheme() != "https" {
+        return Err("URL torrent non-HTTPS refusée".into());
+    }
+    if parsed.port().is_some() {
+        return Err("URL torrent avec port non standard refusée".into());
+    }
+
+    let host = parsed.host_str().ok_or("URL torrent sans hôte")?.to_owned();
+
+    // Défense en profondeur : rejeter les noms internes sans résolution.
+    let host_lc = host.to_ascii_lowercase();
+    if host_lc == "localhost"
+        || host_lc.ends_with(".local")
+        || host_lc.ends_with(".localhost")
+        || host_lc.ends_with(".internal")
+    {
+        return Err(format!("URL torrent vers hôte interne refusée : {host}").into());
+    }
+
+    // Résolution DNS : valider TOUTES les IPs retournées, puis pinner la première.
+    let addrs: Vec<_> = tokio::net::lookup_host((&*host, 443u16))
+        .await
+        .map_err(|e| format!("Résolution DNS échouée pour {host} : {e}"))?
+        .collect();
+
+    if addrs.is_empty() {
+        return Err(format!("Aucune adresse résolue pour {host}").into());
+    }
+
+    for addr in &addrs {
+        if is_blocked_ip(addr.ip()) {
+            return Err(format!(
+                "URL torrent résolue vers IP protégée refusée : {} → {}",
+                host,
+                addr.ip()
+            )
+            .into());
+        }
+    }
+
+    // Pinner la première IP résolue pour éviter le rebinding DNS entre validation et fetch.
+    let pinned = addrs[0];
+
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .timeout(Duration::from_secs(30))
+        .resolve(&host, pinned)
+        .build()?;
+
+    let bytes = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("Téléchargement .torrent échoué : {e}"))?
+        .bytes()
+        .await
+        .map_err(|e| format!("Lecture bytes .torrent échouée : {e}"))?;
+
+    Ok(AddTorrent::from_bytes(bytes))
+}
+
 /// BitTorrent download path via librqbit.
 async fn download_and_stage_torrent(
     db: &Database,
@@ -292,6 +381,17 @@ async fn download_and_stage_torrent(
     media_dir: &Path,
     quarantine: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // For HTTPS .torrent URLs: download ourselves with DNS pre-resolution + IP pinning,
+    // then pass bytes to librqbit. Magnet URIs are passed through directly (no HTTP request).
+    let add_torrent = match resolve_torrent_add(magnet_or_url).await {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("ERREUR résolution source torrent : {e}");
+            let _ = db.finish_acquisition_claim(lease, "failed").await;
+            return Ok(());
+        }
+    };
+
     let staging_dir = media_dir.join(".norylum-staging");
 
     let session = Arc::new(
@@ -319,7 +419,7 @@ async fn download_and_stage_torrent(
 
     let response = session
         .add_torrent(
-            AddTorrent::from_url(magnet_or_url),
+            add_torrent,
             Some(AddTorrentOptions {
                 output_folder: Some(quarantine.to_string_lossy().to_string()),
                 ..Default::default()

@@ -24,6 +24,7 @@ norylum-metadata = { path = "../../crates/metadata" }
 norylum-torrent = { path = "../../crates/torrent" }
 norylum-acquisition-transport = { path = "../../crates/acquisition-transport" }
 norylum-acquisition-providers = { path = "../../crates/acquisition-providers" }
+norylum-transcoding = { path = "../../crates/transcoding" }
 reqwest.workspace = true
 librqbit = "=9.0.1"
 xmltree = "0.11"

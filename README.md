@@ -47,6 +47,7 @@ server/
 ├── crates/
 │   ├── acquisition-transport/ (worker queue, source registry)
 │   ├── acquisition-providers/ (Provider trait, ProwlarrProvider)
+│   ├── transcoding/           (HwAccel detection, ffmpeg fMP4 pipe)
 │   ├── api/
 │   ├── auth/
 │   ├── authorization/

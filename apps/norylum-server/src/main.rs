@@ -8,6 +8,7 @@ use norylum_authorization::DefaultAuthorizer;
 use norylum_catalog::CatalogService;
 use norylum_persistence::Database;
 use norylum_playback::PlaybackService;
+use norylum_transcoding::detect_hw_accel;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -52,8 +53,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let authorizer = Arc::new(DefaultAuthorizer::new());
     let playback = Arc::new(PlaybackService::new(db));
 
+    // Détection de l'accélérateur GPU pour le transcodage à la volée.
+    let hw_accel = detect_hw_accel().await;
+    tracing::info!(accel = hw_accel.as_str(), "Accélérateur de transcodage sélectionné");
+
     // Injection de l'état partagé (remplace les appels HTTP inter-services)
-    let app_state = AppState::new(canonical_media_dir, catalog, authorizer, playback);
+    let app_state = AppState::new(canonical_media_dir, catalog, authorizer, playback, hw_accel);
 
     // Initialisation du premier compte uniquement.
     match (

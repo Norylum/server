@@ -53,6 +53,7 @@ async fn test_devices_v1_http_security() {
         Arc::new(CatalogService::in_memory()),
         Arc::new(DefaultAuthorizer::new()),
         Arc::new(PlaybackService::in_memory()),
+            norylum_transcoding::HwAccel::Software,
     );
 
     let auth = state.auth.clone();

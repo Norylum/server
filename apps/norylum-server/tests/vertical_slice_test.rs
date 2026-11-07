@@ -6,6 +6,7 @@ use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
 use http_body_util::BodyExt;
 use norylum_api::{create_router, AppState};
+use norylum_transcoding::HwAccel;
 use norylum_authorization::DefaultAuthorizer;
 use norylum_catalog::{CatalogService, SeasonDetails, ShowDetails, ShowRecord};
 use norylum_library::MediaItem;
@@ -55,6 +56,7 @@ async fn test_full_vertical_slice() {
         catalog.clone(),
         authorizer.clone(),
         playback.clone(),
+        HwAccel::Software,
     );
 
     let auth = state.auth.clone();
@@ -385,6 +387,7 @@ async fn test_full_vertical_slice() {
         reboot_catalog.clone(),
         authorizer.clone(),
         reboot_playback.clone(),
+        HwAccel::Software,
     );
     let reboot_app = create_router(reboot_state);
 
