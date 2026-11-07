@@ -379,12 +379,13 @@ async fn run() -> Result<(), NorylumError> {
 
     let root = fs::canonicalize(root)?;
 
-    // Preview remains read-only. Applying changes requires exclusive access
-    // to the volume, including when the server uses a non-default port.
-    let _instance_lock = if apply {
-        Some(instance_lock::InstanceLock::acquire(&root).map_err(|e| {
+    // Preview is read-only. Applying changes takes a TaggerLock so two
+    // concurrent tagging runs cannot interfere. The server keeps its own
+    // InstanceLock on a different file, so they can run simultaneously.
+    let _tagger_lock = if apply {
+        Some(instance_lock::TaggerLock::acquire(&root).map_err(|e| {
             NorylumError::Conflict(format!(
-                "Arreter Norylum et les autres writers avant --apply : {e}"
+                "Un tagging Norylum est deja en cours : {e}"
             ))
         })?)
     } else {
