@@ -16,7 +16,14 @@ Elles ne constituent pas des publications de versions stables.
 
 ---
 
-## [Unreleased]
+## [0.1.0] — 2026-11-07
+
+### Infra — Verrous de processus indépendants
+
+- `InstanceLock` (`.norylum-instance.lock`) : verrou exclusif du serveur uniquement ; empêche deux instances de serveur.
+- Nouveau `TaggerLock` (`.norylum-tagger.lock`) : verrou exclusif de `norylum-metadata-tags --apply` uniquement ; empêche deux runs de tagging simultanés.
+- Le serveur et le tagger peuvent désormais tourner en parallèle sans conflit.
+- Test `server_and_tagger_can_coexist` encode l'invariant de non-conflit.
 
 ### Streaming V2 — Transcodage adaptatif avec accélération GPU
 
@@ -610,6 +617,8 @@ notamment HTTPS, limitation des tentatives de connexion
 et protections supplémentaires des profils.
 
 ---
+
+[0.1.0]: https://github.com/norylum/server/releases/tag/v0.1.0
 
 **Norylum — IA-Propelled Project**
 
